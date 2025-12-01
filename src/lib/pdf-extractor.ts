@@ -133,17 +133,16 @@ async function tryLoadPDFWithFallbacks(
   
   const attempts: { method: string; config: any }[] = [
     {
-      method: 'standard_load_no_worker',
+      method: 'standard_load',
       config: {
         data: arrayBuffer,
         useWorkerFetch: false,
         isEvalSupported: false,
         useSystemFonts: true,
-        disableWorker: true,
       }
     },
     {
-      method: 'load_with_recovery_no_worker',
+      method: 'load_with_recovery',
       config: {
         data: arrayBuffer,
         useWorkerFetch: false,
@@ -151,11 +150,10 @@ async function tryLoadPDFWithFallbacks(
         useSystemFonts: true,
         stopAtErrors: false,
         disableFontFace: true,
-        disableWorker: true,
       }
     },
     {
-      method: 'load_ignore_errors_no_worker',
+      method: 'load_ignore_errors',
       config: {
         data: arrayBuffer,
         useWorkerFetch: false,
@@ -164,18 +162,16 @@ async function tryLoadPDFWithFallbacks(
         stopAtErrors: false,
         disableFontFace: true,
         verbosity: 0,
-        disableWorker: true,
       }
     },
     {
-      method: 'load_minimal_no_worker',
+      method: 'load_minimal',
       config: {
         data: new Uint8Array(arrayBuffer),
         useWorkerFetch: false,
         isEvalSupported: false,
         disableFontFace: true,
         stopAtErrors: false,
-        disableWorker: true,
       }
     }
   ]
@@ -187,20 +183,18 @@ async function tryLoadPDFWithFallbacks(
     try {
       const pdf = await pdfjsLib.getDocument(attempt.config).promise
       
-      const isNoWorker = attempt.method.includes('no_worker')
       diagnostic.attempts.push({
         method: attempt.method,
         success: true,
         details: { 
           pages: pdf.numPages, 
-          workerMode: isNoWorker ? 'no-worker' : workerInit.mode,
-          disableWorker: isNoWorker 
+          workerMode: workerInit.mode,
         },
         timestamp: attemptStart,
         duration: Date.now() - attemptStart
       })
       
-      diagnostic.autoRepairUsed = attempt.method !== 'standard_load_no_worker' ? attempt.method : undefined
+      diagnostic.autoRepairUsed = attempt.method !== 'standard_load' ? attempt.method : undefined
       
       return pdf
     } catch (error: any) {
