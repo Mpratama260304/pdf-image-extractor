@@ -121,6 +121,16 @@ async function tryLoadPDFWithFallbacks(
   diagnostic: DiagnosticInfo
 ): Promise<pdfjsLib.PDFDocumentProxy> {
   const workerInit = await initializePDFWorker()
+  
+  diagnostic.attempts.push({
+    method: 'worker_initialization',
+    success: workerInit.success,
+    details: { mode: workerInit.mode },
+    error: workerInit.error?.message,
+    timestamp: Date.now(),
+    duration: 0
+  })
+  
   if (!workerInit.success) {
     throw workerInit.error || new Error('Worker initialization failed')
   }
@@ -180,7 +190,7 @@ async function tryLoadPDFWithFallbacks(
       diagnostic.attempts.push({
         method: attempt.method,
         success: true,
-        details: { pages: pdf.numPages },
+        details: { pages: pdf.numPages, workerMode: workerInit.mode },
         timestamp: attemptStart,
         duration: Date.now() - attemptStart
       })
@@ -299,19 +309,11 @@ function findEOFMarker(bytes: Uint8Array): boolean {
 function generateRecommendations(diagnostic: DiagnosticInfo): string[] {
   const recommendations: string[] = []
   
-  if (diagnostic.errorCode === 'WORKER_LOAD_ERROR') {
-    recommendations.push('Browser gagal memuat PDF worker - ekstraksi otomatis dilanjutkan di server')
-    recommendations.push('Periksa koneksi internet dan refresh halaman')
-    recommendations.push('Pastikan browser Anda tidak memblokir Web Workers')
-    recommendations.push('Coba gunakan browser yang berbeda (Chrome, Firefox, Edge)')
-    return recommendations
-  }
-  
-  if (diagnostic.errorCode === 'ALL_METHODS_FAILED') {
-    recommendations.push('Baik client maupun server gagal - file mungkin sangat rusak')
+  if (diagnostic.errorCode === 'WORKER_LOAD_ERROR' || diagnostic.errorCode === 'ALL_METHODS_FAILED') {
+    recommendations.push('PDF.js gagal memuat - periksa apakah browser Anda mendukung Web Workers')
+    recommendations.push('Coba refresh halaman dan upload ulang file PDF')
     recommendations.push('Buka PDF di Adobe Reader dan Save As dengan nama baru')
-    recommendations.push('Gunakan "Print to PDF" untuk membuat file yang lebih kompatibel')
-    recommendations.push('Periksa apakah file dapat dibuka di aplikasi PDF viewer lain')
+    recommendations.push('Gunakan browser yang berbeda (Chrome, Firefox, Edge terbaru)')
     return recommendations
   }
   
@@ -693,45 +695,6 @@ export async function extractImagesFromPDF(
           )
         }
         
-        if (workerLoadFailed) {
-          diagnostic.errorCode = 'WORKER_LOAD_ERROR'
-          diagnostic.errorMessage = loadError.message
-          diagnostic.stackTrace = loadError.stack
-          diagnostic.recommendations = [
-            'Browser worker gagal dimuat, mencoba ekstraksi di server...',
-            'Periksa koneksi internet dan refresh halaman jika masalah berlanjut'
-          ]
-          
-          console.warn('Client-side PDF worker failed, falling back to server:', loadError)
-          onProgress?.(30, 'Client worker failed, switching to server extraction...')
-          
-          try {
-            const serverResult = await extractViaServer(file, diagnostic, onProgress)
-            diagnostic.duration = Date.now() - startTime
-            return serverResult
-          } catch (serverError: any) {
-            diagnostic.attempts.push({
-              method: 'final_fallback_failed',
-              success: false,
-              error: `Both client and server extraction failed. Client: ${loadError.message}, Server: ${serverError.message}`,
-              timestamp: Date.now(),
-              duration: 0
-            })
-            
-            diagnostic.errorCode = 'ALL_METHODS_FAILED'
-            diagnostic.errorMessage = `Client worker error: ${loadError.message}; Server error: ${serverError.message}`
-            diagnostic.stackTrace = loadError.stack
-            diagnostic.duration = Date.now() - startTime
-            diagnostic.recommendations = generateRecommendations(diagnostic)
-            
-            throw new PDFExtractionError(
-              'Gagal memuat PDF baik di browser maupun server. File mungkin rusak atau menggunakan format yang tidak didukung.',
-              'ALL_METHODS_FAILED',
-              diagnostic
-            )
-          }
-        }
-        
         diagnostic.errorCode = 'PDF_LOAD_FAILED'
         diagnostic.errorMessage = loadError.message
         diagnostic.stackTrace = loadError.stack
@@ -748,25 +711,16 @@ export async function extractImagesFromPDF(
         throw error
       }
       
-      console.warn('Unexpected error during client extraction, trying server fallback:', error)
-      onProgress?.(30, 'Client extraction failed, trying server...')
+      diagnostic.errorCode = 'UNKNOWN_ERROR'
+      diagnostic.errorMessage = error instanceof Error ? error.message : String(error)
+      diagnostic.stackTrace = error instanceof Error ? error.stack : undefined
+      diagnostic.duration = Date.now() - startTime
       
-      try {
-        const serverResult = await extractViaServer(file, diagnostic, onProgress)
-        diagnostic.duration = Date.now() - startTime
-        return serverResult
-      } catch (serverError: any) {
-        diagnostic.errorCode = 'UNKNOWN_ERROR'
-        diagnostic.errorMessage = error instanceof Error ? error.message : String(error)
-        diagnostic.stackTrace = error instanceof Error ? error.stack : undefined
-        diagnostic.duration = Date.now() - startTime
-        
-        throw new PDFExtractionError(
-          'Terjadi kesalahan tidak terduga saat memproses PDF.',
-          'UNKNOWN_ERROR',
-          diagnostic
-        )
-      }
+      throw new PDFExtractionError(
+        'Terjadi kesalahan tidak terduga saat memproses PDF.',
+        'UNKNOWN_ERROR',
+        diagnostic
+      )
     }
     
     if (!pdf) {

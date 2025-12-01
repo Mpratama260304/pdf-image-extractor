@@ -1,20 +1,30 @@
 import * as pdfjsLib from 'pdfjs-dist'
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 let workerInitialized = false
 let workerInitError: Error | null = null
+let workerMode: 'worker' | 'no-worker' = 'worker'
 
-export async function initializePDFWorker(): Promise<{ success: boolean; error?: Error }> {
+export async function initializePDFWorker(): Promise<{ success: boolean; error?: Error; mode: 'worker' | 'no-worker' }> {
   if (workerInitialized) {
-    return { success: true }
+    return { success: true, mode: workerMode }
   }
 
   if (workerInitError) {
-    return { success: false, error: workerInitError }
+    return { success: false, error: workerInitError, mode: workerMode }
   }
 
   try {
+    let workerUrl: string
+    try {
+      const workerModule = await import('pdfjs-dist/build/pdf.worker.min.mjs?url')
+      workerUrl = workerModule.default
+    } catch (importError) {
+      console.warn('Failed to import worker via Vite ?url, trying legacy path:', importError)
+      workerUrl = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).href
+    }
+
     pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
+    console.log('PDF.js worker URL set to:', workerUrl)
 
     const testData = new Uint8Array([
       0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a, 0x25, 0xe2, 0xe3,
@@ -36,32 +46,53 @@ export async function initializePDFWorker(): Promise<{ success: boolean; error?:
       0x30, 0x30, 0x30, 0x20, 0x36, 0x35, 0x35, 0x33, 0x35, 0x20, 0x66, 0x20,
       0x0a, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x31, 0x35, 0x20,
       0x30, 0x30, 0x30, 0x30, 0x30, 0x20, 0x6e, 0x20, 0x0a, 0x30, 0x30, 0x30,
-      0x30, 0x30, 0x30, 0x30, 0x30, 0x37, 0x34, 0x20, 0x30, 0x30, 0x30, 0x30,
-      0x30, 0x20, 0x6e, 0x20, 0x0a, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
-      0x31, 0x34, 0x37, 0x20, 0x30, 0x30, 0x30, 0x30, 0x30, 0x20, 0x6e, 0x20,
-      0x0a, 0x74, 0x72, 0x61, 0x69, 0x6c, 0x65, 0x72, 0x0a, 0x3c, 0x3c, 0x2f,
-      0x52, 0x6f, 0x6f, 0x74, 0x20, 0x31, 0x20, 0x30, 0x20, 0x52, 0x2f, 0x53,
-      0x69, 0x7a, 0x65, 0x20, 0x34, 0x3e, 0x3e, 0x0a, 0x73, 0x74, 0x61, 0x72,
-      0x74, 0x78, 0x72, 0x65, 0x66, 0x0a, 0x32, 0x35, 0x33, 0x0a, 0x25, 0x25,
-      0x45, 0x4f, 0x46, 0x0a
+      0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x37, 0x34, 0x20, 0x30, 0x30, 0x30,
+      0x30, 0x30, 0x20, 0x6e, 0x20, 0x0a, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+      0x30, 0x31, 0x34, 0x37, 0x20, 0x30, 0x30, 0x30, 0x30, 0x30, 0x20, 0x6e,
+      0x20, 0x0a, 0x74, 0x72, 0x61, 0x69, 0x6c, 0x65, 0x72, 0x0a, 0x3c, 0x3c,
+      0x2f, 0x52, 0x6f, 0x6f, 0x74, 0x20, 0x31, 0x20, 0x30, 0x20, 0x52, 0x2f,
+      0x53, 0x69, 0x7a, 0x65, 0x20, 0x34, 0x3e, 0x3e, 0x0a, 0x73, 0x74, 0x61,
+      0x72, 0x74, 0x78, 0x72, 0x65, 0x66, 0x0a, 0x32, 0x35, 0x33, 0x0a, 0x25,
+      0x25, 0x45, 0x4f, 0x46, 0x0a
     ])
 
-    const loadingTask = pdfjsLib.getDocument({ 
-      data: testData,
-      useWorkerFetch: false,
-      isEvalSupported: false,
-    })
-    
-    const testDoc = await loadingTask.promise
-    await testDoc.destroy()
+    try {
+      const loadingTask = pdfjsLib.getDocument({ 
+        data: testData,
+        useWorkerFetch: false,
+        isEvalSupported: false,
+      })
+      
+      const testDoc = await loadingTask.promise
+      await testDoc.destroy()
 
-    workerInitialized = true
-    console.log('PDF.js worker initialized successfully')
-    return { success: true }
+      workerInitialized = true
+      workerMode = 'worker'
+      console.log('PDF.js worker initialized successfully with Web Worker')
+      return { success: true, mode: 'worker' }
+    } catch (workerError: any) {
+      console.warn('Worker mode failed:', workerError)
+      
+      pdfjsLib.GlobalWorkerOptions.workerSrc = ''
+      
+      const loadingTaskNoWorker = pdfjsLib.getDocument({ 
+        data: testData,
+        useWorkerFetch: false,
+        isEvalSupported: false,
+      } as any)
+      
+      const testDocNoWorker = await loadingTaskNoWorker.promise
+      await testDocNoWorker.destroy()
+
+      workerInitialized = true
+      workerMode = 'no-worker'
+      console.log('PDF.js initialized successfully WITHOUT Web Worker (main thread mode)')
+      return { success: true, mode: 'no-worker' }
+    }
   } catch (error) {
     workerInitError = error instanceof Error ? error : new Error('Unknown worker initialization error')
-    console.error('PDF.js worker initialization failed:', workerInitError)
-    return { success: false, error: workerInitError }
+    console.error('PDF.js initialization completely failed (both worker and no-worker modes):', workerInitError)
+    return { success: false, error: workerInitError, mode: workerMode }
   }
 }
 
@@ -71,4 +102,8 @@ export function isWorkerInitialized(): boolean {
 
 export function getWorkerError(): Error | null {
   return workerInitError
+}
+
+export function getWorkerMode(): 'worker' | 'no-worker' {
+  return workerMode
 }

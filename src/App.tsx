@@ -112,70 +112,6 @@ function App() {
     setErrorInfo(null)
   }
 
-  const handleForceServerExtraction = async () => {
-    if (!currentFile) {
-      toast.error('No file available for server extraction')
-      return
-    }
-
-    setView('processing')
-    setProgress(0)
-    setStatus('Forcing server-side extraction...')
-    setIsProcessing(true)
-    setErrorInfo(null)
-
-    try {
-      toast.info('Uploading to server for processing...')
-      
-      const result = await extractImagesFromPDF(currentFile, (prog, stat) => {
-        setProgress(prog)
-        setStatus(stat)
-      })
-
-      if (result.images.length === 0) {
-        toast.error('No images found in PDF')
-        setView('upload')
-        return
-      }
-
-      setExtractionResult(result)
-      
-      toast.success(
-        <div className="flex items-center gap-2">
-          <CheckCircle weight="fill" className="w-5 h-5 text-green-500" />
-          <span>Extracted {result.images.length} images!</span>
-        </div>
-      )
-      
-      setTimeout(() => {
-        setView('results')
-      }, 500)
-    } catch (error) {
-      console.error('Server extraction error:', error)
-      
-      if (error instanceof PDFExtractionError) {
-        setErrorInfo({
-          code: error.code,
-          message: error.message,
-          diagnostic: error.diagnostic
-        })
-        setView('error')
-        toast.error(error.message)
-      } else {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
-        toast.error('Server extraction also failed')
-        setErrorInfo({
-          code: 'SERVER_EXTRACTION_FAILED',
-          message: errorMessage,
-          diagnostic: undefined
-        })
-        setView('error')
-      }
-    } finally {
-      setIsProcessing(false)
-    }
-  }
-
   return (
     <div className="min-h-screen bg-background text-foreground">
       <Toaster position="top-right" theme="dark" />
@@ -271,7 +207,6 @@ function App() {
                 diagnostic={errorInfo.diagnostic}
                 onRetry={handleRetryAfterError}
                 onBack={handleBackToHero}
-                onForceServerExtraction={handleForceServerExtraction}
               />
             </motion.div>
           )}
