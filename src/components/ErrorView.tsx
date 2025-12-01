@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Warning, Download, ArrowLeft, Info } from '@phosphor-icons/react'
+import { Warning, Download, ArrowLeft, Info, CloudArrowUp } from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -12,6 +12,7 @@ interface ErrorViewProps {
   diagnostic?: DiagnosticInfo
   onRetry: () => void
   onBack: () => void
+  onForceServerExtraction?: () => void
 }
 
 const errorMessages: Record<string, { title: string; description: string; tips: string[] }> = {
@@ -49,6 +50,28 @@ const errorMessages: Record<string, { title: string; description: string; tips: 
       'Buka PDF dengan kata sandi dan ekspor ulang tanpa proteksi',
       'Gunakan tools PDF unlock jika Anda memiliki izin',
       'Minta versi tidak terenkripsi dari pengirim file'
+    ]
+  },
+  WORKER_LOAD_ERROR: {
+    title: 'PDF Worker Gagal Dimuat',
+    description: 'Browser gagal memuat PDF processing worker. Ekstraksi server-side akan dicoba.',
+    tips: [
+      'Refresh halaman dan coba lagi',
+      'Periksa koneksi internet Anda',
+      'Pastikan browser Anda mengizinkan Web Workers',
+      'Coba gunakan browser lain (Chrome, Firefox, Edge)',
+      'Ekstraksi otomatis dilanjutkan di server jika tersedia'
+    ]
+  },
+  ALL_METHODS_FAILED: {
+    title: 'Semua Metode Gagal',
+    description: 'Baik ekstraksi client-side maupun server-side gagal memproses PDF ini.',
+    tips: [
+      'Buka PDF di Adobe Reader dan save as dengan nama baru',
+      'Coba "Print to PDF" untuk membuat file yang lebih kompatibel',
+      'Periksa apakah file PDF rusak atau corrupt',
+      'Download diagnostic untuk detail teknis lengkap',
+      'Hubungi support dengan file diagnostic'
     ]
   },
   PDF_LOAD_FAILED: {
@@ -91,8 +114,9 @@ const errorMessages: Record<string, { title: string; description: string; tips: 
   }
 }
 
-export function ErrorView({ errorCode, errorMessage, diagnostic, onRetry, onBack }: ErrorViewProps) {
+export function ErrorView({ errorCode, errorMessage, diagnostic, onRetry, onBack, onForceServerExtraction }: ErrorViewProps) {
   const errorInfo = errorMessages[errorCode] || errorMessages.UNKNOWN_ERROR
+  const showServerButton = errorCode === 'WORKER_LOAD_ERROR' || errorCode === 'PDF_LOAD_FAILED'
 
   const handleDownloadDiagnostic = () => {
     if (diagnostic) {
@@ -225,6 +249,12 @@ export function ErrorView({ errorCode, errorMessage, diagnostic, onRetry, onBack
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3 pt-4">
+            {showServerButton && onForceServerExtraction && (
+              <Button onClick={onForceServerExtraction} className="flex-1">
+                <CloudArrowUp weight="bold" className="w-4 h-4 mr-2" />
+                Proses di Server
+              </Button>
+            )}
             <Button onClick={onRetry} className="flex-1" variant="outline">
               <ArrowLeft weight="bold" className="w-4 h-4 mr-2" />
               Coba File Lain

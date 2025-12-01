@@ -1,6 +1,25 @@
 import * as pdfjsLib from 'pdfjs-dist'
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+let workerInitialized = false
+let workerError: Error | null = null
+
+async function initializePDFWorker() {
+  if (workerInitialized) return
+  
+  try {
+    const workerUrl = new URL(
+      'pdfjs-dist/build/pdf.worker.min.mjs',
+      import.meta.url
+    ).href
+    
+    pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
+    workerInitialized = true
+  } catch (error) {
+    workerError = error instanceof Error ? error : new Error('Failed to initialize PDF worker')
+    console.error('PDF worker initialization failed:', error)
+    throw workerError
+  }
+}
 
 export interface ExtractedImage {
   id: string
@@ -47,6 +66,19 @@ export interface DiagnosticAttempt {
   details?: any
   timestamp: number
   duration?: number
+}
+
+export interface ServerExtractionResponse {
+  success: boolean
+  images?: {
+    data: string
+    format: string
+    width: number
+    height: number
+    pageNumber: number
+  }[]
+  error?: string
+  diagnostic?: DiagnosticInfo
 }
 
 export class PDFExtractionError extends Error {
@@ -108,6 +140,8 @@ async function tryLoadPDFWithFallbacks(
   arrayBuffer: ArrayBuffer,
   diagnostic: DiagnosticInfo
 ): Promise<pdfjsLib.PDFDocumentProxy> {
+  await initializePDFWorker()
+  
   const attempts: { method: string; config: any }[] = [
     {
       method: 'standard_load',
@@ -281,6 +315,22 @@ function findEOFMarker(bytes: Uint8Array): boolean {
 
 function generateRecommendations(diagnostic: DiagnosticInfo): string[] {
   const recommendations: string[] = []
+  
+  if (diagnostic.errorCode === 'WORKER_LOAD_ERROR') {
+    recommendations.push('Browser gagal memuat PDF worker - ekstraksi otomatis dilanjutkan di server')
+    recommendations.push('Periksa koneksi internet dan refresh halaman')
+    recommendations.push('Pastikan browser Anda tidak memblokir Web Workers')
+    recommendations.push('Coba gunakan browser yang berbeda (Chrome, Firefox, Edge)')
+    return recommendations
+  }
+  
+  if (diagnostic.errorCode === 'ALL_METHODS_FAILED') {
+    recommendations.push('Baik client maupun server gagal - file mungkin sangat rusak')
+    recommendations.push('Buka PDF di Adobe Reader dan Save As dengan nama baru')
+    recommendations.push('Gunakan "Print to PDF" untuk membuat file yang lebih kompatibel')
+    recommendations.push('Periksa apakah file dapat dibuka di aplikasi PDF viewer lain')
+    return recommendations
+  }
   
   if (diagnostic.errorCode === 'PDF_LOAD_FAILED') {
     recommendations.push('Buka PDF di Adobe Reader dan Save As dengan nama baru')
@@ -457,6 +507,84 @@ async function rasterizePages(
   return images
 }
 
+async function extractViaServer(
+  file: File,
+  diagnostic: DiagnosticInfo,
+  onProgress?: (progress: number, status: string) => void
+): Promise<ExtractionResult> {
+  const attemptStart = Date.now()
+  
+  try {
+    onProgress?.(10, 'Uploading to server for processing...')
+    
+    const formData = new FormData()
+    formData.append('pdf', file, file.name)
+    formData.append('sessionId', diagnostic.sessionId)
+    
+    const response = await fetch('/api/extract-images', {
+      method: 'POST',
+      body: formData,
+    })
+    
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`Server extraction failed: ${response.status} ${errorText}`)
+    }
+    
+    onProgress?.(50, 'Processing on server...')
+    
+    const result: ServerExtractionResponse = await response.json()
+    
+    if (!result.success || !result.images || result.images.length === 0) {
+      throw new Error(result.error || 'Server extraction returned no images')
+    }
+    
+    onProgress?.(80, 'Converting server response...')
+    
+    const images: ExtractedImage[] = result.images.map((img, index) => ({
+      id: `${file.name}-server-${index}-${Date.now()}`,
+      dataUrl: img.data.startsWith('data:') ? img.data : `data:image/${img.format.toLowerCase()};base64,${img.data}`,
+      pageNumber: img.pageNumber,
+      width: img.width,
+      height: img.height,
+      format: img.format.toUpperCase(),
+      filename: `${file.name.replace('.pdf', '')}_page-${img.pageNumber}.${img.format.toLowerCase()}`,
+    }))
+    
+    diagnostic.attempts.push({
+      method: 'server_extraction',
+      success: true,
+      imageCount: images.length,
+      timestamp: attemptStart,
+      duration: Date.now() - attemptStart
+    })
+    
+    onProgress?.(100, 'Server extraction complete!')
+    
+    return {
+      images,
+      totalPages: result.diagnostic?.pageCount || images.length,
+      pdfName: file.name,
+      diagnostic: {
+        ...diagnostic,
+        ...result.diagnostic,
+        attempts: [...diagnostic.attempts, ...(result.diagnostic?.attempts || [])]
+      }
+    }
+  } catch (error: any) {
+    diagnostic.attempts.push({
+      method: 'server_extraction',
+      success: false,
+      error: error.message,
+      errorStack: error.stack,
+      timestamp: attemptStart,
+      duration: Date.now() - attemptStart
+    })
+    
+    throw error
+  }
+}
+
 export async function extractImagesFromPDF(
   file: File,
   onProgress?: (progress: number, status: string) => void
@@ -501,90 +629,165 @@ export async function extractImagesFromPDF(
       }
     }
 
-    onProgress?.(10, 'Loading PDF document...')
+    let arrayBuffer: ArrayBuffer
+    let pdf: pdfjsLib.PDFDocumentProxy | null = null
+    let workerLoadFailed = false
     
-    let arrayBuffer = await file.arrayBuffer()
-    
-    onProgress?.(15, 'Computing file fingerprint...')
-    diagnostic.fileMd5 = await calculateMD5(arrayBuffer)
-    diagnostic.pdfVersion = extractPDFVersion(arrayBuffer)
-    
-    const headerValidation = validatePDFHeader(arrayBuffer)
-    diagnostic.pdfHeader = headerValidation.header
-    
-    if (!headerValidation.valid) {
-      const attemptStart = Date.now()
-      diagnostic.attempts.push({
-        method: 'header_validation',
-        success: false,
-        error: `Invalid PDF header: "${headerValidation.header}"`,
-        timestamp: attemptStart,
-        duration: Date.now() - attemptStart
-      })
+    try {
+      onProgress?.(10, 'Loading PDF document...')
       
-      onProgress?.(20, 'Attempting header repair...')
-      const repairedBuffer = await attemptPDFRepair(arrayBuffer, diagnostic)
+      arrayBuffer = await file.arrayBuffer()
       
-      if (repairedBuffer) {
-        arrayBuffer = repairedBuffer
-        const repairedValidation = validatePDFHeader(arrayBuffer)
-        if (repairedValidation.valid) {
-          diagnostic.pdfHeader = repairedValidation.header
-          diagnostic.attempts.push({
-            method: 'header_validation_after_repair',
-            success: true,
-            timestamp: Date.now(),
-            duration: 0
-          })
+      onProgress?.(15, 'Computing file fingerprint...')
+      diagnostic.fileMd5 = await calculateMD5(arrayBuffer)
+      diagnostic.pdfVersion = extractPDFVersion(arrayBuffer)
+      
+      const headerValidation = validatePDFHeader(arrayBuffer)
+      diagnostic.pdfHeader = headerValidation.header
+      
+      if (!headerValidation.valid) {
+        const attemptStart = Date.now()
+        diagnostic.attempts.push({
+          method: 'header_validation',
+          success: false,
+          error: `Invalid PDF header: "${headerValidation.header}"`,
+          timestamp: attemptStart,
+          duration: Date.now() - attemptStart
+        })
+        
+        onProgress?.(20, 'Attempting header repair...')
+        const repairedBuffer = await attemptPDFRepair(arrayBuffer, diagnostic)
+        
+        if (repairedBuffer) {
+          arrayBuffer = repairedBuffer
+          const repairedValidation = validatePDFHeader(arrayBuffer)
+          if (repairedValidation.valid) {
+            diagnostic.pdfHeader = repairedValidation.header
+            diagnostic.attempts.push({
+              method: 'header_validation_after_repair',
+              success: true,
+              timestamp: Date.now(),
+              duration: 0
+            })
+          }
+        } else {
+          diagnostic.errorCode = 'INVALID_PDF'
+          diagnostic.errorMessage = `File header does not match PDF format: "${headerValidation.header}"`
+          diagnostic.duration = Date.now() - startTime
+          diagnostic.recommendations = generateRecommendations(diagnostic)
+          throw new PDFExtractionError(
+            'File rusak atau bukan PDF yang valid. Header file tidak sesuai format PDF.',
+            'INVALID_PDF',
+            diagnostic
+          )
         }
       } else {
-        diagnostic.errorCode = 'INVALID_PDF'
-        diagnostic.errorMessage = `File header does not match PDF format: "${headerValidation.header}"`
+        diagnostic.attempts.push({
+          method: 'header_validation',
+          success: true,
+          timestamp: Date.now(),
+          duration: 0
+        })
+      }
+
+      try {
+        onProgress?.(25, 'Loading PDF with enhanced compatibility...')
+        pdf = await tryLoadPDFWithFallbacks(arrayBuffer, diagnostic)
+      } catch (loadError: any) {
+        workerLoadFailed = loadError.message?.includes('worker') || 
+                          loadError.message?.includes('Worker') ||
+                          loadError.message?.includes('fetch')
+        
+        if (loadError.message?.includes('password') || loadError.message?.includes('encrypted')) {
+          diagnostic.errorCode = 'PDF_ENCRYPTED'
+          diagnostic.errorMessage = 'PDF is password protected'
+          diagnostic.duration = Date.now() - startTime
+          diagnostic.stackTrace = loadError.stack
+          throw new PDFExtractionError(
+            'PDF ini terenkripsi. Silakan buka file dengan sandi terlebih dahulu atau ekspor ulang tanpa enkripsi.',
+            'PDF_ENCRYPTED',
+            diagnostic
+          )
+        }
+        
+        if (workerLoadFailed) {
+          diagnostic.errorCode = 'WORKER_LOAD_ERROR'
+          diagnostic.errorMessage = loadError.message
+          diagnostic.stackTrace = loadError.stack
+          diagnostic.recommendations = [
+            'Browser worker gagal dimuat, mencoba ekstraksi di server...',
+            'Periksa koneksi internet dan refresh halaman jika masalah berlanjut'
+          ]
+          
+          console.warn('Client-side PDF worker failed, falling back to server:', loadError)
+          onProgress?.(30, 'Client worker failed, switching to server extraction...')
+          
+          try {
+            const serverResult = await extractViaServer(file, diagnostic, onProgress)
+            diagnostic.duration = Date.now() - startTime
+            return serverResult
+          } catch (serverError: any) {
+            diagnostic.attempts.push({
+              method: 'final_fallback_failed',
+              success: false,
+              error: `Both client and server extraction failed. Client: ${loadError.message}, Server: ${serverError.message}`,
+              timestamp: Date.now(),
+              duration: 0
+            })
+            
+            diagnostic.errorCode = 'ALL_METHODS_FAILED'
+            diagnostic.errorMessage = `Client worker error: ${loadError.message}; Server error: ${serverError.message}`
+            diagnostic.stackTrace = loadError.stack
+            diagnostic.duration = Date.now() - startTime
+            diagnostic.recommendations = generateRecommendations(diagnostic)
+            
+            throw new PDFExtractionError(
+              'Gagal memuat PDF baik di browser maupun server. File mungkin rusak atau menggunakan format yang tidak didukung.',
+              'ALL_METHODS_FAILED',
+              diagnostic
+            )
+          }
+        }
+        
+        diagnostic.errorCode = 'PDF_LOAD_FAILED'
+        diagnostic.errorMessage = loadError.message
+        diagnostic.stackTrace = loadError.stack
         diagnostic.duration = Date.now() - startTime
         diagnostic.recommendations = generateRecommendations(diagnostic)
         throw new PDFExtractionError(
-          'File rusak atau bukan PDF yang valid. Header file tidak sesuai format PDF.',
-          'INVALID_PDF',
+          'Gagal memuat PDF. File mungkin rusak atau menggunakan format yang tidak didukung.',
+          'PDF_LOAD_FAILED',
           diagnostic
         )
       }
-    } else {
-      diagnostic.attempts.push({
-        method: 'header_validation',
-        success: true,
-        timestamp: Date.now(),
-        duration: 0
-      })
-    }
-
-    let pdf: pdfjsLib.PDFDocumentProxy
-    
-    try {
-      onProgress?.(25, 'Loading PDF with enhanced compatibility...')
-      pdf = await tryLoadPDFWithFallbacks(arrayBuffer, diagnostic)
-    } catch (loadError: any) {
-      if (loadError.message?.includes('password') || loadError.message?.includes('encrypted')) {
-        diagnostic.errorCode = 'PDF_ENCRYPTED'
-        diagnostic.errorMessage = 'PDF is password protected'
-        diagnostic.duration = Date.now() - startTime
-        diagnostic.stackTrace = loadError.stack
-        throw new PDFExtractionError(
-          'PDF ini terenkripsi. Silakan buka file dengan sandi terlebih dahulu atau ekspor ulang tanpa enkripsi.',
-          'PDF_ENCRYPTED',
-          diagnostic
-        )
+    } catch (error) {
+      if (error instanceof PDFExtractionError) {
+        throw error
       }
       
-      diagnostic.errorCode = 'PDF_LOAD_FAILED'
-      diagnostic.errorMessage = loadError.message
-      diagnostic.stackTrace = loadError.stack
-      diagnostic.duration = Date.now() - startTime
-      diagnostic.recommendations = generateRecommendations(diagnostic)
-      throw new PDFExtractionError(
-        'Gagal memuat PDF. File mungkin rusak atau menggunakan format yang tidak didukung.',
-        'PDF_LOAD_FAILED',
-        diagnostic
-      )
+      console.warn('Unexpected error during client extraction, trying server fallback:', error)
+      onProgress?.(30, 'Client extraction failed, trying server...')
+      
+      try {
+        const serverResult = await extractViaServer(file, diagnostic, onProgress)
+        diagnostic.duration = Date.now() - startTime
+        return serverResult
+      } catch (serverError: any) {
+        diagnostic.errorCode = 'UNKNOWN_ERROR'
+        diagnostic.errorMessage = error instanceof Error ? error.message : String(error)
+        diagnostic.stackTrace = error instanceof Error ? error.stack : undefined
+        diagnostic.duration = Date.now() - startTime
+        
+        throw new PDFExtractionError(
+          'Terjadi kesalahan tidak terduga saat memproses PDF.',
+          'UNKNOWN_ERROR',
+          diagnostic
+        )
+      }
+    }
+    
+    if (!pdf) {
+      throw new Error('PDF object is null after loading')
     }
     
     diagnostic.pageCount = pdf.numPages

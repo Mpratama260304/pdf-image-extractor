@@ -1,5 +1,105 @@
 # Changelog - PDF Image Extractor
 
+## [3.0.0] - Worker Bundling & Server-Side Fallback
+
+### 🚀 Critical Fixes
+
+#### PDF Worker Loading
+- **Local Worker Bundling** - PDF.js worker now bundled with app instead of loading from CDN
+- **No External Dependencies** - Eliminates failures from blocked CDNs or offline usage
+- **Import-Based Loading** - Uses Vite's `import.meta.url` for reliable worker resolution
+- **Error Detection** - Automatically detects worker loading failures
+
+#### Automatic Server-Side Fallback
+- **Seamless Transition** - Automatically switches to server extraction when client fails
+- **Worker Error Handling** - Detects worker initialization failures and triggers fallback
+- **Parse Error Recovery** - Falls back to server when PDF parsing fails in browser
+- **Progress Updates** - Shows status during server-side processing
+
+### 🎨 UI Improvements
+
+#### Enhanced Error View
+- **"Process on Server" Button** - Manual trigger for server-side extraction
+- **New Error Types** - `WORKER_LOAD_ERROR` and `ALL_METHODS_FAILED`
+- **Better Context** - Shows which methods were attempted (client vs server)
+- **Improved Recommendations** - Context-aware suggestions based on failure type
+
+#### User Experience
+- **Transparent Fallback** - Users don't need to know about technical details
+- **Clear Status Messages** - "Client worker failed, switching to server extraction..."
+- **Method Indicators** - Diagnostic shows which extraction method succeeded
+- **Toast Notifications** - Informative messages about fallback process
+
+### 📦 New APIs
+
+#### Server Extraction Interface
+- **ServerExtractionResponse** - Typed interface for server API responses
+- **extractViaServer()** - Function to handle server-side extraction
+- **Diagnostic Merging** - Combines client and server diagnostic data
+- **Progress Tracking** - Unified progress reporting across methods
+
+### 📚 Documentation
+
+#### New Documentation Files
+- **SERVER_API_SPEC.md** - Complete specification for server-side API
+- **WORKER_FIX_GUIDE.md** - Detailed guide on worker bundling and fallback
+- **Python/Flask Example** - Sample server implementation with PyMuPDF
+
+#### Architecture Updates
+- Flow diagrams showing client → server fallback
+- CSP configuration recommendations
+- Testing strategies for fallback scenarios
+
+### 🔧 Technical Improvements
+
+#### Worker Initialization
+```typescript
+async function initializePDFWorker() {
+  const workerUrl = new URL(
+    'pdfjs-dist/build/pdf.worker.min.mjs',
+    import.meta.url
+  ).href
+  pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
+}
+```
+
+#### Error Classification
+- Detects worker-specific errors (fetch failures, import errors)
+- Separates worker failures from PDF parsing failures
+- Provides appropriate fallback for each error type
+
+#### Diagnostic Enhancement
+- Records all extraction attempts (client and server)
+- Tracks method used for successful extraction
+- Shows timing for each attempt
+- Captures detailed error messages and stack traces
+
+### 🐛 Bug Fixes
+- Fixed: CDN-based worker loading causing failures when offline
+- Fixed: No fallback when CDN is blocked by firewall
+- Fixed: Unclear error messages for worker loading failures
+- Fixed: No alternative when client-side extraction fails
+
+### 🔐 Security
+- Removed external CDN dependency (CSP-friendly)
+- Worker served from same origin
+- No external network requests required
+- Validates server responses before processing
+
+### ⚡ Performance
+- Faster worker loading (bundled with app)
+- No CDN latency
+- Cached with application assets
+- Reliable offline functionality
+
+### 📋 Migration Notes
+- No breaking changes for end users
+- Automatic fallback handles all failure scenarios
+- Server API endpoint required for full fallback functionality
+- See SERVER_API_SPEC.md for implementation guide
+
+---
+
 ## [2.0.0] - Robust Error Handling & Diagnostics
 
 ### 🎉 Major Features

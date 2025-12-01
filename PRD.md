@@ -20,12 +20,14 @@ A modern, client-side PDF image extraction tool that allows users to upload PDFs
 - **Success criteria**: PDF file is successfully loaded into memory and validated as a proper PDF document
 
 ### Image Extraction Engine
-- **Functionality**: Extract embedded images from PDF using pdf.js, with multiple fallback strategies, auto-repair mechanisms, and comprehensive error handling
-- **Purpose**: Core functionality that retrieves all visual content from the uploaded PDF with robust diagnostics and automatic recovery from common PDF issues
+- **Functionality**: Extract embedded images from PDF using pdf.js with local worker bundling, with multiple fallback strategies including automatic server-side processing, auto-repair mechanisms, and comprehensive error handling
+- **Purpose**: Core functionality that retrieves all visual content from the uploaded PDF with robust diagnostics, automatic recovery from common PDF issues, and seamless fallback when client-side processing fails
 - **Trigger**: User uploads valid PDF file
-- **Progression**: PDF loaded → Compute file fingerprint (SHA-256) & extract PDF version → Validate file header → Auto-repair if needed (header/EOF fixes) → Try multiple PDF loading strategies (standard → recovery mode → minimal mode) → Extract embedded images → If count = 0, rasterize pages at high DPI → If errors occur, collect comprehensive diagnostic data (attempts, durations, stack traces, recommendations) → Display results or friendly error with actionable advice
-- **Success criteria**: All images successfully extracted with correct metadata, or pages rasterized as fallback, within reasonable time (<10s for typical PDFs); errors provide actionable feedback with diagnostic downloads; valid PDFs that open in Adobe Reader successfully process without false positives
+- **Progression**: Initialize local PDF.js worker (no CDN dependency) → PDF loaded → Compute file fingerprint (SHA-256) & extract PDF version → Validate file header → Auto-repair if needed (header/EOF fixes) → Try multiple PDF loading strategies (standard → recovery mode → minimal mode) → If worker fails to load, automatically fall back to server-side extraction → Extract embedded images → If count = 0, rasterize pages at high DPI → If errors occur, collect comprehensive diagnostic data (attempts, durations, stack traces, recommendations) → Display results or friendly error with actionable advice and "Process on Server" button
+- **Success criteria**: All images successfully extracted with correct metadata, or pages rasterized as fallback, within reasonable time (<10s for typical PDFs); errors provide actionable feedback with diagnostic downloads; valid PDFs that open in Adobe Reader successfully process without false positives; worker loading failures automatically trigger server-side fallback without user intervention
 - **Robustness Features**:
+  - Local PDF.js worker bundling (no external CDN dependency)
+  - Automatic server-side fallback when worker loading fails
   - Multiple PDF loading strategies with automatic fallback
   - Automatic header and EOF marker repair for corrupted files
   - File fingerprinting (SHA-256) for diagnostic tracking
@@ -33,6 +35,7 @@ A modern, client-side PDF image extraction tool that allows users to upload PDFs
   - Detailed attempt logging with timestamps and durations
   - Stack trace capture for debugging
   - Context-aware error recommendations based on failure patterns
+  - Manual "Process on Server" option for failed extractions
 
 ### Results Gallery
 - **Functionality**: Display all extracted images in a responsive masonry grid with metadata
