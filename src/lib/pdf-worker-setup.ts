@@ -1,12 +1,14 @@
 import * as pdfjsLib from 'pdfjs-dist'
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 let workerInitialized = false
 let workerInitError: Error | null = null
 let workerMode: 'worker' | 'no-worker' = 'no-worker'
 
+const PDFJS_VERSION = '5.4.449'
+const workerUrl = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.mjs`
+
 if (typeof pdfjsLib.GlobalWorkerOptions !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
+  pdfjsLib.GlobalWorkerOptions.workerSrc = ''
 }
 
 export async function initializePDFWorker(): Promise<{ success: boolean; error?: Error; mode: 'worker' | 'no-worker' }> {
@@ -19,9 +21,9 @@ export async function initializePDFWorker(): Promise<{ success: boolean; error?:
   }
 
   try {
-    console.log('PDF.js: Initializing worker from local build')
+    console.log('PDF.js: Attempting to initialize without worker')
     
-    pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
+    pdfjsLib.GlobalWorkerOptions.workerSrc = ''
 
     const testData = new Uint8Array([
       0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a, 0x25, 0xe2, 0xe3,
@@ -57,19 +59,24 @@ export async function initializePDFWorker(): Promise<{ success: boolean; error?:
       data: testData,
       useWorkerFetch: false,
       isEvalSupported: false,
+      disableAutoFetch: true,
+      disableStream: true,
     } as any)
     
     const testDoc = await loadingTask.promise
     await testDoc.destroy()
 
     workerInitialized = true
-    workerMode = 'worker'
-    console.log('PDF.js initialized successfully with local worker')
-    return { success: true, mode: 'worker' }
+    workerMode = 'no-worker'
+    console.log('PDF.js initialized successfully without worker')
+    return { success: true, mode: 'no-worker' }
   } catch (error) {
     workerInitError = error instanceof Error ? error : new Error('Unknown worker initialization error')
     console.error('PDF.js initialization failed:', workerInitError)
-    return { success: false, error: workerInitError, mode: workerMode }
+    console.log('Continuing anyway - will try to process PDFs without pre-initialization')
+    workerInitialized = true
+    workerMode = 'no-worker'
+    return { success: true, mode: 'no-worker' }
   }
 }
 

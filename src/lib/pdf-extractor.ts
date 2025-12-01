@@ -139,6 +139,8 @@ async function tryLoadPDFWithFallbacks(
         useWorkerFetch: false,
         isEvalSupported: false,
         useSystemFonts: true,
+        disableAutoFetch: true,
+        disableStream: true,
       }
     },
     {
@@ -150,6 +152,8 @@ async function tryLoadPDFWithFallbacks(
         useSystemFonts: true,
         stopAtErrors: false,
         disableFontFace: true,
+        disableAutoFetch: true,
+        disableStream: true,
       }
     },
     {
@@ -162,6 +166,8 @@ async function tryLoadPDFWithFallbacks(
         stopAtErrors: false,
         disableFontFace: true,
         verbosity: 0,
+        disableAutoFetch: true,
+        disableStream: true,
       }
     },
     {
@@ -172,6 +178,8 @@ async function tryLoadPDFWithFallbacks(
         isEvalSupported: false,
         disableFontFace: true,
         stopAtErrors: false,
+        disableAutoFetch: true,
+        disableStream: true,
       }
     }
   ]
