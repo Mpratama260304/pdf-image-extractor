@@ -133,6 +133,19 @@ async function tryLoadPDFWithFallbacks(
   
   const attempts: { method: string; config: any }[] = [
     {
+      method: 'load_disable_worker',
+      config: {
+        data: arrayBuffer,
+        disableWorker: true,
+        useWorkerFetch: false,
+        isEvalSupported: false,
+        disableFontFace: true,
+        stopAtErrors: false,
+        disableAutoFetch: true,
+        disableStream: true,
+      }
+    },
+    {
       method: 'standard_load',
       config: {
         data: arrayBuffer,
@@ -498,8 +511,6 @@ async function rasterizePages(
   
   return images
 }
-
-
 
 export async function extractImagesFromPDF(
   file: File,
