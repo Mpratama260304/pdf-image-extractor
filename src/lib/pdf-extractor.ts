@@ -23,6 +23,9 @@ export interface DiagnosticInfo {
   sessionId: string
   originalFilename: string
   fileSize: number
+  fileMd5?: string
+  pdfVersion?: string
+  pdfHeader?: string
   pageCount: number
   extractedImageCount: number
   attempts: DiagnosticAttempt[]
@@ -30,14 +33,20 @@ export interface DiagnosticInfo {
   duration: number
   errorCode?: string
   errorMessage?: string
+  stackTrace?: string
+  recommendations?: string[]
+  autoRepairUsed?: string
 }
 
 export interface DiagnosticAttempt {
   method: string
   success: boolean
   error?: string
+  errorStack?: string
   imageCount?: number
   details?: any
+  timestamp: number
+  duration?: number
 }
 
 export class PDFExtractionError extends Error {
@@ -59,10 +68,30 @@ function generateSessionId(): string {
   return `pdf_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 }
 
-function validatePDFHeader(arrayBuffer: ArrayBuffer): boolean {
+async function calculateMD5(arrayBuffer: ArrayBuffer): Promise<string> {
+  const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+function extractPDFVersion(arrayBuffer: ArrayBuffer): string {
+  try {
+    const bytes = new Uint8Array(arrayBuffer.slice(0, 20))
+    const header = String.fromCharCode(...bytes)
+    const versionMatch = header.match(/%PDF-(\d+\.\d+)/)
+    return versionMatch ? versionMatch[1] : 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
+function validatePDFHeader(arrayBuffer: ArrayBuffer): { valid: boolean; header: string } {
   const bytes = new Uint8Array(arrayBuffer.slice(0, 5))
   const header = String.fromCharCode(...bytes)
-  return header === '%PDF-'
+  return {
+    valid: header === '%PDF-',
+    header: header
+  }
 }
 
 async function checkIfEncrypted(pdf: pdfjsLib.PDFDocumentProxy): Promise<boolean> {
@@ -73,6 +102,202 @@ async function checkIfEncrypted(pdf: pdfjsLib.PDFDocumentProxy): Promise<boolean
   } catch {
     return false
   }
+}
+
+async function tryLoadPDFWithFallbacks(
+  arrayBuffer: ArrayBuffer,
+  diagnostic: DiagnosticInfo
+): Promise<pdfjsLib.PDFDocumentProxy> {
+  const attempts: { method: string; config: any }[] = [
+    {
+      method: 'standard_load',
+      config: {
+        data: arrayBuffer,
+        useWorkerFetch: false,
+        isEvalSupported: false,
+        useSystemFonts: true,
+      }
+    },
+    {
+      method: 'load_with_recovery',
+      config: {
+        data: arrayBuffer,
+        useWorkerFetch: false,
+        isEvalSupported: false,
+        useSystemFonts: true,
+        stopAtErrors: false,
+        disableFontFace: true,
+      }
+    },
+    {
+      method: 'load_ignore_errors',
+      config: {
+        data: arrayBuffer,
+        useWorkerFetch: false,
+        isEvalSupported: false,
+        useSystemFonts: true,
+        stopAtErrors: false,
+        disableFontFace: true,
+        verbosity: 0,
+      }
+    },
+    {
+      method: 'load_minimal',
+      config: {
+        data: new Uint8Array(arrayBuffer),
+        useWorkerFetch: false,
+        isEvalSupported: false,
+        disableFontFace: true,
+        stopAtErrors: false,
+      }
+    }
+  ]
+
+  let lastError: any = null
+
+  for (const attempt of attempts) {
+    const attemptStart = Date.now()
+    try {
+      const pdf = await pdfjsLib.getDocument(attempt.config).promise
+      
+      diagnostic.attempts.push({
+        method: attempt.method,
+        success: true,
+        details: { pages: pdf.numPages },
+        timestamp: attemptStart,
+        duration: Date.now() - attemptStart
+      })
+      
+      diagnostic.autoRepairUsed = attempt.method !== 'standard_load' ? attempt.method : undefined
+      
+      return pdf
+    } catch (error: any) {
+      lastError = error
+      diagnostic.attempts.push({
+        method: attempt.method,
+        success: false,
+        error: error.message || String(error),
+        errorStack: error.stack,
+        timestamp: attemptStart,
+        duration: Date.now() - attemptStart
+      })
+    }
+  }
+
+  throw lastError
+}
+
+async function attemptPDFRepair(
+  arrayBuffer: ArrayBuffer,
+  diagnostic: DiagnosticInfo
+): Promise<ArrayBuffer | null> {
+  const attemptStart = Date.now()
+  
+  try {
+    const bytes = new Uint8Array(arrayBuffer)
+    
+    const hasPDFHeader = bytes[0] === 0x25 && bytes[1] === 0x50 && 
+                         bytes[2] === 0x44 && bytes[3] === 0x46
+    
+    if (!hasPDFHeader) {
+      const pdfHeaderIndex = findPDFHeaderIndex(bytes)
+      if (pdfHeaderIndex > 0) {
+        const repairedBytes = bytes.slice(pdfHeaderIndex)
+        diagnostic.attempts.push({
+          method: 'header_repair',
+          success: true,
+          details: { removedBytes: pdfHeaderIndex },
+          timestamp: attemptStart,
+          duration: Date.now() - attemptStart
+        })
+        return repairedBytes.buffer
+      }
+    }
+
+    const hasEOFMarker = findEOFMarker(bytes)
+    if (!hasEOFMarker) {
+      const repairedBytes = new Uint8Array(bytes.length + 6)
+      repairedBytes.set(bytes)
+      repairedBytes.set([0x0A, 0x25, 0x25, 0x45, 0x4F, 0x46], bytes.length)
+      diagnostic.attempts.push({
+        method: 'eof_repair',
+        success: true,
+        details: { addedEOF: true },
+        timestamp: attemptStart,
+        duration: Date.now() - attemptStart
+      })
+      return repairedBytes.buffer
+    }
+
+    diagnostic.attempts.push({
+      method: 'pdf_repair',
+      success: false,
+      error: 'No repairs applicable',
+      timestamp: attemptStart,
+      duration: Date.now() - attemptStart
+    })
+    
+    return null
+  } catch (error: any) {
+    diagnostic.attempts.push({
+      method: 'pdf_repair',
+      success: false,
+      error: error.message,
+      errorStack: error.stack,
+      timestamp: attemptStart,
+      duration: Date.now() - attemptStart
+    })
+    return null
+  }
+}
+
+function findPDFHeaderIndex(bytes: Uint8Array): number {
+  for (let i = 0; i < Math.min(bytes.length - 5, 1024); i++) {
+    if (bytes[i] === 0x25 && bytes[i+1] === 0x50 && 
+        bytes[i+2] === 0x44 && bytes[i+3] === 0x46) {
+      return i
+    }
+  }
+  return -1
+}
+
+function findEOFMarker(bytes: Uint8Array): boolean {
+  const eofMarker = [0x25, 0x25, 0x45, 0x4F, 0x46]
+  const searchStart = Math.max(0, bytes.length - 1024)
+  
+  for (let i = bytes.length - 1; i >= searchStart; i--) {
+    let found = true
+    for (let j = 0; j < eofMarker.length; j++) {
+      if (bytes[i - eofMarker.length + 1 + j] !== eofMarker[j]) {
+        found = false
+        break
+      }
+    }
+    if (found) return true
+  }
+  
+  return false
+}
+
+function generateRecommendations(diagnostic: DiagnosticInfo): string[] {
+  const recommendations: string[] = []
+  
+  if (diagnostic.errorCode === 'PDF_LOAD_FAILED') {
+    recommendations.push('Buka PDF di Adobe Reader dan Save As dengan nama baru')
+    recommendations.push('Gunakan "Print to PDF" untuk membuat salinan bersih')
+    recommendations.push('Coba export ulang dari aplikasi sumber dengan PDF 1.4 compatibility')
+    
+    const headerAttempt = diagnostic.attempts.find(a => a.method === 'header_validation')
+    if (headerAttempt && !headerAttempt.success) {
+      recommendations.push('File mungkin memiliki data tambahan di awal - coba buka dengan PDF repair tool')
+    }
+    
+    if (diagnostic.pdfVersion && parseFloat(diagnostic.pdfVersion) > 1.7) {
+      recommendations.push(`PDF versi ${diagnostic.pdfVersion} mungkin terlalu baru - coba save as PDF 1.7 atau lebih rendah`)
+    }
+  }
+  
+  return recommendations
 }
 
 async function extractEmbeddedImages(
@@ -255,6 +480,7 @@ export async function extractImagesFromPDF(
     if (file.size > MAX_FILE_SIZE) {
       diagnostic.errorCode = 'FILE_TOO_LARGE'
       diagnostic.errorMessage = `File size ${(file.size / 1024 / 1024).toFixed(1)}MB exceeds limit of ${MAX_FILE_SIZE / 1024 / 1024}MB`
+      diagnostic.duration = Date.now() - startTime
       throw new PDFExtractionError(
         `File terlalu besar (${(file.size / 1024 / 1024).toFixed(1)}MB). Maksimal ${MAX_FILE_SIZE / 1024 / 1024}MB.`,
         'FILE_TOO_LARGE',
@@ -266,6 +492,7 @@ export async function extractImagesFromPDF(
       if (!file.name.toLowerCase().endsWith('.pdf')) {
         diagnostic.errorCode = 'NOT_PDF'
         diagnostic.errorMessage = 'File does not have PDF extension or MIME type'
+        diagnostic.duration = Date.now() - startTime
         throw new PDFExtractionError(
           'File bukan PDF. Pastikan file yang diunggah adalah dokumen PDF.',
           'NOT_PDF',
@@ -276,53 +503,71 @@ export async function extractImagesFromPDF(
 
     onProgress?.(10, 'Loading PDF document...')
     
-    const arrayBuffer = await file.arrayBuffer()
+    let arrayBuffer = await file.arrayBuffer()
     
-    if (!validatePDFHeader(arrayBuffer)) {
+    onProgress?.(15, 'Computing file fingerprint...')
+    diagnostic.fileMd5 = await calculateMD5(arrayBuffer)
+    diagnostic.pdfVersion = extractPDFVersion(arrayBuffer)
+    
+    const headerValidation = validatePDFHeader(arrayBuffer)
+    diagnostic.pdfHeader = headerValidation.header
+    
+    if (!headerValidation.valid) {
+      const attemptStart = Date.now()
       diagnostic.attempts.push({
         method: 'header_validation',
         success: false,
-        error: 'Invalid PDF header'
+        error: `Invalid PDF header: "${headerValidation.header}"`,
+        timestamp: attemptStart,
+        duration: Date.now() - attemptStart
       })
-      diagnostic.errorCode = 'INVALID_PDF'
-      diagnostic.errorMessage = 'File header does not match PDF format'
-      throw new PDFExtractionError(
-        'File rusak atau bukan PDF yang valid. Header file tidak sesuai format PDF.',
-        'INVALID_PDF',
-        diagnostic
-      )
+      
+      onProgress?.(20, 'Attempting header repair...')
+      const repairedBuffer = await attemptPDFRepair(arrayBuffer, diagnostic)
+      
+      if (repairedBuffer) {
+        arrayBuffer = repairedBuffer
+        const repairedValidation = validatePDFHeader(arrayBuffer)
+        if (repairedValidation.valid) {
+          diagnostic.pdfHeader = repairedValidation.header
+          diagnostic.attempts.push({
+            method: 'header_validation_after_repair',
+            success: true,
+            timestamp: Date.now(),
+            duration: 0
+          })
+        }
+      } else {
+        diagnostic.errorCode = 'INVALID_PDF'
+        diagnostic.errorMessage = `File header does not match PDF format: "${headerValidation.header}"`
+        diagnostic.duration = Date.now() - startTime
+        diagnostic.recommendations = generateRecommendations(diagnostic)
+        throw new PDFExtractionError(
+          'File rusak atau bukan PDF yang valid. Header file tidak sesuai format PDF.',
+          'INVALID_PDF',
+          diagnostic
+        )
+      }
+    } else {
+      diagnostic.attempts.push({
+        method: 'header_validation',
+        success: true,
+        timestamp: Date.now(),
+        duration: 0
+      })
     }
-    
-    diagnostic.attempts.push({
-      method: 'header_validation',
-      success: true
-    })
 
     let pdf: pdfjsLib.PDFDocumentProxy
     
     try {
-      pdf = await pdfjsLib.getDocument({ 
-        data: arrayBuffer,
-        useWorkerFetch: false,
-        isEvalSupported: false,
-        useSystemFonts: true,
-      }).promise
-      
-      diagnostic.attempts.push({
-        method: 'pdf_load',
-        success: true,
-        details: { pages: pdf.numPages }
-      })
+      onProgress?.(25, 'Loading PDF with enhanced compatibility...')
+      pdf = await tryLoadPDFWithFallbacks(arrayBuffer, diagnostic)
     } catch (loadError: any) {
-      diagnostic.attempts.push({
-        method: 'pdf_load',
-        success: false,
-        error: loadError.message
-      })
-      
       if (loadError.message?.includes('password') || loadError.message?.includes('encrypted')) {
         diagnostic.errorCode = 'PDF_ENCRYPTED'
         diagnostic.errorMessage = 'PDF is password protected'
+        diagnostic.duration = Date.now() - startTime
+        diagnostic.stackTrace = loadError.stack
         throw new PDFExtractionError(
           'PDF ini terenkripsi. Silakan buka file dengan sandi terlebih dahulu atau ekspor ulang tanpa enkripsi.',
           'PDF_ENCRYPTED',
@@ -332,6 +577,9 @@ export async function extractImagesFromPDF(
       
       diagnostic.errorCode = 'PDF_LOAD_FAILED'
       diagnostic.errorMessage = loadError.message
+      diagnostic.stackTrace = loadError.stack
+      diagnostic.duration = Date.now() - startTime
+      diagnostic.recommendations = generateRecommendations(diagnostic)
       throw new PDFExtractionError(
         'Gagal memuat PDF. File mungkin rusak atau menggunakan format yang tidak didukung.',
         'PDF_LOAD_FAILED',
@@ -344,6 +592,7 @@ export async function extractImagesFromPDF(
     if (pdf.numPages > MAX_PAGES) {
       diagnostic.errorCode = 'TOO_MANY_PAGES'
       diagnostic.errorMessage = `PDF has ${pdf.numPages} pages, exceeds limit of ${MAX_PAGES}`
+      diagnostic.duration = Date.now() - startTime
       throw new PDFExtractionError(
         `PDF terlalu banyak halaman (${pdf.numPages}). Maksimal ${MAX_PAGES} halaman.`,
         'TOO_MANY_PAGES',
@@ -353,13 +602,17 @@ export async function extractImagesFromPDF(
     
     const isEncrypted = await checkIfEncrypted(pdf)
     if (isEncrypted) {
+      const attemptStart = Date.now()
       diagnostic.attempts.push({
         method: 'encryption_check',
         success: false,
-        error: 'PDF is encrypted'
+        error: 'PDF is encrypted',
+        timestamp: attemptStart,
+        duration: Date.now() - attemptStart
       })
       diagnostic.errorCode = 'PDF_ENCRYPTED'
       diagnostic.errorMessage = 'PDF has encryption'
+      diagnostic.duration = Date.now() - startTime
       throw new PDFExtractionError(
         'PDF ini memiliki enkripsi. Silakan gunakan file tanpa proteksi.',
         'PDF_ENCRYPTED',
@@ -372,10 +625,13 @@ export async function extractImagesFromPDF(
     try {
       images = await extractEmbeddedImages(pdf, file, onProgress)
       
+      const attemptStart = Date.now()
       diagnostic.attempts.push({
         method: 'embedded_extraction',
         success: true,
-        imageCount: images.length
+        imageCount: images.length,
+        timestamp: attemptStart,
+        duration: Date.now() - attemptStart
       })
       
       if (images.length > 0) {
@@ -391,11 +647,15 @@ export async function extractImagesFromPDF(
         }
       }
     } catch (extractError: any) {
+      const attemptStart = Date.now()
       diagnostic.attempts.push({
         method: 'embedded_extraction',
         success: false,
         error: extractError.message,
-        imageCount: images.length
+        errorStack: extractError.stack,
+        imageCount: images.length,
+        timestamp: attemptStart,
+        duration: Date.now() - attemptStart
       })
     }
     
@@ -405,11 +665,14 @@ export async function extractImagesFromPDF(
       const maxPagesToRasterize = Math.min(pdf.numPages, 500)
       images = await rasterizePages(pdf, file, maxPagesToRasterize, 200, onProgress)
       
+      const attemptStart = Date.now()
       diagnostic.attempts.push({
         method: 'rasterization',
         success: true,
         imageCount: images.length,
-        details: { dpi: 200, maxPages: maxPagesToRasterize }
+        details: { dpi: 200, maxPages: maxPagesToRasterize },
+        timestamp: attemptStart,
+        duration: Date.now() - attemptStart
       })
       
       if (images.length > 0) {
@@ -425,10 +688,14 @@ export async function extractImagesFromPDF(
         }
       }
     } catch (rasterError: any) {
+      const attemptStart = Date.now()
       diagnostic.attempts.push({
         method: 'rasterization',
         success: false,
-        error: rasterError.message
+        error: rasterError.message,
+        errorStack: rasterError.stack,
+        timestamp: attemptStart,
+        duration: Date.now() - attemptStart
       })
     }
     
@@ -450,6 +717,7 @@ export async function extractImagesFromPDF(
     
     diagnostic.errorCode = 'UNKNOWN_ERROR'
     diagnostic.errorMessage = error instanceof Error ? error.message : String(error)
+    diagnostic.stackTrace = error instanceof Error ? error.stack : undefined
     
     throw new PDFExtractionError(
       'Terjadi kesalahan tidak terduga saat memproses PDF.',
@@ -488,6 +756,9 @@ export function formatDiagnosticMessage(diagnostic: DiagnosticInfo): string {
   const lines = [
     `Session: ${diagnostic.sessionId}`,
     `File: ${diagnostic.originalFilename} (${(diagnostic.fileSize / 1024 / 1024).toFixed(2)}MB)`,
+    `MD5: ${diagnostic.fileMd5 || 'N/A'}`,
+    `PDF Version: ${diagnostic.pdfVersion || 'unknown'}`,
+    `PDF Header: ${diagnostic.pdfHeader || 'N/A'}`,
     `Pages: ${diagnostic.pageCount}`,
     `Duration: ${(diagnostic.duration / 1000).toFixed(2)}s`,
     ``,
@@ -502,10 +773,24 @@ export function formatDiagnosticMessage(diagnostic: DiagnosticInfo): string {
     if (attempt.imageCount !== undefined) {
       lines.push(`   Images: ${attempt.imageCount}`)
     }
+    if (attempt.duration !== undefined) {
+      lines.push(`   Duration: ${attempt.duration}ms`)
+    }
   })
+  
+  if (diagnostic.autoRepairUsed) {
+    lines.push(``, `Auto-Repair Method Used: ${diagnostic.autoRepairUsed}`)
+  }
   
   if (diagnostic.errorCode) {
     lines.push(``, `Error: ${diagnostic.errorCode}`, `Message: ${diagnostic.errorMessage}`)
+  }
+  
+  if (diagnostic.recommendations && diagnostic.recommendations.length > 0) {
+    lines.push(``, `Recommendations:`)
+    diagnostic.recommendations.forEach((rec, i) => {
+      lines.push(`${i + 1}. ${rec}`)
+    })
   }
   
   return lines.join('\n')

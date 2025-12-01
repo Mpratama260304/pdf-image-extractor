@@ -20,11 +20,19 @@ A modern, client-side PDF image extraction tool that allows users to upload PDFs
 - **Success criteria**: PDF file is successfully loaded into memory and validated as a proper PDF document
 
 ### Image Extraction Engine
-- **Functionality**: Extract embedded images from PDF using pdf.js, with multiple fallback strategies and comprehensive error handling
-- **Purpose**: Core functionality that retrieves all visual content from the uploaded PDF with robust diagnostics
+- **Functionality**: Extract embedded images from PDF using pdf.js, with multiple fallback strategies, auto-repair mechanisms, and comprehensive error handling
+- **Purpose**: Core functionality that retrieves all visual content from the uploaded PDF with robust diagnostics and automatic recovery from common PDF issues
 - **Trigger**: User uploads valid PDF file
-- **Progression**: PDF loaded → Validate file (size, header, encryption) → Extract embedded images → If count = 0, rasterize pages at high DPI → If errors occur, collect diagnostic data → Display results or friendly error
-- **Success criteria**: All images successfully extracted with correct metadata, or pages rasterized as fallback, within reasonable time (<10s for typical PDFs); errors provide actionable feedback with diagnostic downloads
+- **Progression**: PDF loaded → Compute file fingerprint (SHA-256) & extract PDF version → Validate file header → Auto-repair if needed (header/EOF fixes) → Try multiple PDF loading strategies (standard → recovery mode → minimal mode) → Extract embedded images → If count = 0, rasterize pages at high DPI → If errors occur, collect comprehensive diagnostic data (attempts, durations, stack traces, recommendations) → Display results or friendly error with actionable advice
+- **Success criteria**: All images successfully extracted with correct metadata, or pages rasterized as fallback, within reasonable time (<10s for typical PDFs); errors provide actionable feedback with diagnostic downloads; valid PDFs that open in Adobe Reader successfully process without false positives
+- **Robustness Features**:
+  - Multiple PDF loading strategies with automatic fallback
+  - Automatic header and EOF marker repair for corrupted files
+  - File fingerprinting (SHA-256) for diagnostic tracking
+  - PDF version detection and compatibility recommendations
+  - Detailed attempt logging with timestamps and durations
+  - Stack trace capture for debugging
+  - Context-aware error recommendations based on failure patterns
 
 ### Results Gallery
 - **Functionality**: Display all extracted images in a responsive masonry grid with metadata
@@ -48,11 +56,11 @@ A modern, client-side PDF image extraction tool that allows users to upload PDFs
 - **Success criteria**: Results persist across browser sessions, load quickly on return
 
 ### Error Handling & Diagnostics
-- **Functionality**: Comprehensive error detection with diagnostic data collection and user-friendly error messages
-- **Purpose**: Help users understand why extraction failed and provide actionable solutions
-- **Trigger**: Any extraction error occurs (invalid file, corrupted PDF, encryption, size limits)
-- **Progression**: Error detected → Collect diagnostic data (file info, attempts, duration) → Display friendly error screen → Offer diagnostic download → Show specific tips for resolution
-- **Success criteria**: Users receive clear, actionable error messages in Indonesian with specific recovery steps; diagnostic JSON available for debugging
+- **Functionality**: Comprehensive error detection with diagnostic data collection, auto-repair attempts, and user-friendly error messages with specific recommendations
+- **Purpose**: Help users understand why extraction failed and provide actionable solutions; reduce false-positive failures on valid PDFs
+- **Trigger**: Any extraction error occurs (invalid file, corrupted PDF, encryption, size limits, load failures)
+- **Progression**: Error detected → Attempt automatic repairs (header fix, EOF marker, alternative loading strategies) → Collect diagnostic data (file hash, PDF version, header info, all attempts with timestamps/durations, error stack traces) → Generate context-aware recommendations → Display friendly error screen → Offer diagnostic download with full technical details → Show specific tips for resolution
+- **Success criteria**: Users receive clear, actionable error messages in Indonesian with specific recovery steps; diagnostic JSON available with complete technical details for debugging; valid PDFs that open in standard readers process successfully; auto-repair recovers common PDF corruption issues transparently
 
 ## Edge Case Handling
 
