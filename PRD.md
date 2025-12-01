@@ -20,11 +20,11 @@ A modern, client-side PDF image extraction tool that allows users to upload PDFs
 - **Success criteria**: PDF file is successfully loaded into memory and validated as a proper PDF document
 
 ### Image Extraction Engine
-- **Functionality**: Extract embedded images from PDF using pdf.js, with fallback to page rasterization if no images found
-- **Purpose**: Core functionality that retrieves all visual content from the uploaded PDF
+- **Functionality**: Extract embedded images from PDF using pdf.js, with multiple fallback strategies and comprehensive error handling
+- **Purpose**: Core functionality that retrieves all visual content from the uploaded PDF with robust diagnostics
 - **Trigger**: User uploads valid PDF file
-- **Progression**: PDF loaded → Parse document structure → Extract embedded images → If count = 0, rasterize pages at high DPI → Generate metadata (page number, dimensions, format) → Display results
-- **Success criteria**: All images successfully extracted with correct metadata, or pages rasterized as fallback, within reasonable time (<10s for typical PDFs)
+- **Progression**: PDF loaded → Validate file (size, header, encryption) → Extract embedded images → If count = 0, rasterize pages at high DPI → If errors occur, collect diagnostic data → Display results or friendly error
+- **Success criteria**: All images successfully extracted with correct metadata, or pages rasterized as fallback, within reasonable time (<10s for typical PDFs); errors provide actionable feedback with diagnostic downloads
 
 ### Results Gallery
 - **Functionality**: Display all extracted images in a responsive masonry grid with metadata
@@ -47,14 +47,25 @@ A modern, client-side PDF image extraction tool that allows users to upload PDFs
 - **Progression**: Extraction complete → Save to KV with session ID → User closes tab → User returns → Session restored → Previous results displayed
 - **Success criteria**: Results persist across browser sessions, load quickly on return
 
+### Error Handling & Diagnostics
+- **Functionality**: Comprehensive error detection with diagnostic data collection and user-friendly error messages
+- **Purpose**: Help users understand why extraction failed and provide actionable solutions
+- **Trigger**: Any extraction error occurs (invalid file, corrupted PDF, encryption, size limits)
+- **Progression**: Error detected → Collect diagnostic data (file info, attempts, duration) → Display friendly error screen → Offer diagnostic download → Show specific tips for resolution
+- **Success criteria**: Users receive clear, actionable error messages in Indonesian with specific recovery steps; diagnostic JSON available for debugging
+
 ## Edge Case Handling
 
-- **Invalid File Upload** - Display clear error toast if uploaded file is not a valid PDF or is corrupted
+- **Invalid File Upload** - Display clear error screen with diagnostic info if uploaded file is not a valid PDF or is corrupted
 - **Empty PDF** - Show friendly message if PDF contains no images and no pages to rasterize
-- **Large PDFs** - Display progress indicator for PDFs with many pages, prevent UI freeze during processing
-- **Memory Limits** - Gracefully handle browser memory constraints for extremely large PDFs (100+ MB)
+- **Large PDFs** - Display progress indicator for PDFs with many pages, prevent UI freeze during processing; enforce 200MB limit with clear message
+- **Memory Limits** - Gracefully handle browser memory constraints by adjusting image quality and resolution for extremely large PDFs
 - **Download Failures** - Catch and display errors if ZIP generation or download fails
 - **Mobile Upload** - Ensure file picker works correctly on iOS/Android devices
+- **Encrypted PDFs** - Detect password-protected PDFs early and show clear message with resolution steps
+- **Corrupted Files** - Validate PDF header and structure before processing; provide repair suggestions
+- **Network Issues** - Handle CDN failures for pdf.js worker gracefully
+- **Browser Compatibility** - Test on Chrome, Firefox, Safari, Edge; provide fallback for older browsers
 
 ## Design Direction
 

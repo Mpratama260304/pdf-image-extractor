@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
 import { CircleNotch } from '@phosphor-icons/react'
 import { Progress } from '@/components/ui/progress'
+import { Badge } from '@/components/ui/badge'
 
 interface ProcessingViewProps {
   progress: number
@@ -8,6 +9,13 @@ interface ProcessingViewProps {
 }
 
 export function ProcessingView({ progress, status }: ProcessingViewProps) {
+  const getStage = () => {
+    if (progress < 20) return 'Validating'
+    if (progress < 70) return 'Extracting'
+    if (progress < 95) return 'Finalizing'
+    return 'Complete'
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.9 }}
@@ -25,7 +33,12 @@ export function ProcessingView({ progress, status }: ProcessingViewProps) {
         </motion.div>
 
         <div className="space-y-3">
-          <h3 className="text-2xl font-semibold">Processing PDF</h3>
+          <div className="flex items-center justify-center gap-2">
+            <h3 className="text-2xl font-semibold">Processing PDF</h3>
+            <Badge variant="secondary" className="text-xs">
+              {getStage()}
+            </Badge>
+          </div>
           <p className="text-muted-foreground">{status}</p>
         </div>
 
@@ -35,6 +48,10 @@ export function ProcessingView({ progress, status }: ProcessingViewProps) {
             {Math.round(progress)}%
           </p>
         </div>
+
+        <p className="text-xs text-muted-foreground">
+          Processing may take a moment for large files...
+        </p>
       </div>
     </motion.div>
   )

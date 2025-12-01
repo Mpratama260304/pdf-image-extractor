@@ -52,9 +52,9 @@ export function Hero({ onGetStarted }: HeroProps) {
             className="pt-12 grid grid-cols-1 md:grid-cols-3 gap-6 max-w-3xl mx-auto"
           >
             {[
-              { icon: '🚀', title: 'Lightning Fast', desc: 'Process PDFs in seconds' },
-              { icon: '🔒', title: 'Fully Private', desc: 'Files never leave your device' },
-              { icon: '📦', title: 'Batch Download', desc: 'Export all images as ZIP' },
+              { icon: '🚀', title: 'Lightning Fast', desc: 'Process PDFs in seconds with optimized rendering' },
+              { icon: '🔒', title: 'Fully Private', desc: 'Files never leave your device - 100% client-side' },
+              { icon: '🛡️', title: 'Robust & Safe', desc: 'Smart error handling with diagnostic reports' },
             ].map((feature, i) => (
               <motion.div
                 key={i}

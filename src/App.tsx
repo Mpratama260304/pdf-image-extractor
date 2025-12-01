@@ -6,11 +6,12 @@ import { Hero } from '@/components/Hero'
 import { UploadZone } from '@/components/UploadZone'
 import { ProcessingView } from '@/components/ProcessingView'
 import { ImageGallery } from '@/components/ImageGallery'
-import { extractImagesFromPDF } from '@/lib/pdf-extractor'
+import { ErrorView } from '@/components/ErrorView'
+import { extractImagesFromPDF, PDFExtractionError, type DiagnosticInfo } from '@/lib/pdf-extractor'
 import { CheckCircle, ArrowLeft } from '@phosphor-icons/react'
 import type { ExtractionResult } from '@/lib/pdf-extractor'
 
-type ViewState = 'hero' | 'upload' | 'processing' | 'results'
+type ViewState = 'hero' | 'upload' | 'processing' | 'results' | 'error'
 
 function App() {
   const [view, setView] = useState<ViewState>('hero')
@@ -18,6 +19,11 @@ function App() {
   const [progress, setProgress] = useState(0)
   const [status, setStatus] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)
+  const [errorInfo, setErrorInfo] = useState<{
+    code: string
+    message: string
+    diagnostic?: DiagnosticInfo
+  } | null>(null)
 
   const handleGetStarted = () => {
     setView('upload')
@@ -28,6 +34,7 @@ function App() {
     setView('processing')
     setProgress(0)
     setStatus('Starting extraction...')
+    setErrorInfo(null)
 
     try {
       const result = await extractImagesFromPDF(file, (prog, stat) => {
@@ -54,9 +61,26 @@ function App() {
         setView('results')
       }, 500)
     } catch (error) {
-      console.error(error)
-      toast.error(error instanceof Error ? error.message : 'Failed to extract images')
-      setView('upload')
+      console.error('Extraction error:', error)
+      
+      if (error instanceof PDFExtractionError) {
+        setErrorInfo({
+          code: error.code,
+          message: error.message,
+          diagnostic: error.diagnostic
+        })
+        setView('error')
+        toast.error(error.message)
+      } else {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
+        setErrorInfo({
+          code: 'UNKNOWN_ERROR',
+          message: errorMessage,
+          diagnostic: undefined
+        })
+        setView('error')
+        toast.error('Failed to extract images from PDF')
+      }
     } finally {
       setIsProcessing(false)
     }
@@ -67,10 +91,20 @@ function App() {
     setExtractionResult(null)
     setProgress(0)
     setStatus('')
+    setErrorInfo(null)
   }
 
   const handleBackToHero = () => {
     setView('hero')
+    setExtractionResult(null)
+    setProgress(0)
+    setStatus('')
+    setErrorInfo(null)
+  }
+
+  const handleRetryAfterError = () => {
+    setView('upload')
+    setErrorInfo(null)
   }
 
   return (
@@ -151,6 +185,23 @@ function App() {
                 images={extractionResult.images}
                 pdfName={extractionResult.pdfName}
                 onStartOver={handleStartOver}
+              />
+            </motion.div>
+          )}
+
+          {view === 'error' && errorInfo && (
+            <motion.div
+              key="error"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+            >
+              <ErrorView
+                errorCode={errorInfo.code}
+                errorMessage={errorInfo.message}
+                diagnostic={errorInfo.diagnostic}
+                onRetry={handleRetryAfterError}
+                onBack={handleBackToHero}
               />
             </motion.div>
           )}

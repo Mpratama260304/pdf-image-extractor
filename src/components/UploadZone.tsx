@@ -126,7 +126,7 @@ export function UploadZone({ onFileSelect, isProcessing }: UploadZoneProps) {
               Drag and drop or click to browse
             </p>
             <p className="text-xs text-muted-foreground mt-2">
-              Supports PDF files up to 100MB
+              Supports PDF files up to 200MB
             </p>
           </motion.div>
         )}
