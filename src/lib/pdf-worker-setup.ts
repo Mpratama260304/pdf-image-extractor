@@ -1,9 +1,8 @@
 import * as pdfjsLib from 'pdfjs-dist'
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 let workerInitialized = false
 let workerInitError: Error | null = null
-let workerMode: 'worker' | 'no-worker' = 'worker'
+let workerMode: 'worker' | 'no-worker' = 'no-worker'
 
 export async function initializePDFWorker(): Promise<{ success: boolean; error?: Error; mode: 'worker' | 'no-worker' }> {
   if (workerInitialized) {
@@ -15,9 +14,9 @@ export async function initializePDFWorker(): Promise<{ success: boolean; error?:
   }
 
   try {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
-    console.log('PDF.js worker URL set to:', workerUrl)
-    console.log('Worker mode: attempting with bundled worker')
+    console.log('PDF.js: Initializing in no-worker mode (main thread)')
+    
+    pdfjsLib.GlobalWorkerOptions.workerSrc = ''
 
     const testData = new Uint8Array([
       0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a, 0x25, 0xe2, 0xe3,
@@ -49,42 +48,23 @@ export async function initializePDFWorker(): Promise<{ success: boolean; error?:
       0x25, 0x45, 0x4f, 0x46, 0x0a
     ])
 
-    try {
-      const loadingTask = pdfjsLib.getDocument({ 
-        data: testData,
-        useWorkerFetch: false,
-        isEvalSupported: false,
-      })
-      
-      const testDoc = await loadingTask.promise
-      await testDoc.destroy()
+    const loadingTask = pdfjsLib.getDocument({ 
+      data: testData,
+      useWorkerFetch: false,
+      isEvalSupported: false,
+      disableWorker: true,
+    })
+    
+    const testDoc = await loadingTask.promise
+    await testDoc.destroy()
 
-      workerInitialized = true
-      workerMode = 'worker'
-      console.log('PDF.js worker initialized successfully with Web Worker')
-      return { success: true, mode: 'worker' }
-    } catch (workerError: any) {
-      console.warn('Worker mode failed:', workerError)
-      
-      pdfjsLib.GlobalWorkerOptions.workerSrc = ''
-      
-      const loadingTaskNoWorker = pdfjsLib.getDocument({ 
-        data: testData,
-        useWorkerFetch: false,
-        isEvalSupported: false,
-      } as any)
-      
-      const testDocNoWorker = await loadingTaskNoWorker.promise
-      await testDocNoWorker.destroy()
-
-      workerInitialized = true
-      workerMode = 'no-worker'
-      console.log('PDF.js initialized successfully WITHOUT Web Worker (main thread mode)')
-      return { success: true, mode: 'no-worker' }
-    }
+    workerInitialized = true
+    workerMode = 'no-worker'
+    console.log('PDF.js initialized successfully in main thread mode (no worker)')
+    return { success: true, mode: 'no-worker' }
   } catch (error) {
     workerInitError = error instanceof Error ? error : new Error('Unknown worker initialization error')
-    console.error('PDF.js initialization completely failed (both worker and no-worker modes):', workerInitError)
+    console.error('PDF.js initialization failed:', workerInitError)
     return { success: false, error: workerInitError, mode: workerMode }
   }
 }

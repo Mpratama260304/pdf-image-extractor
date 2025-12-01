@@ -133,38 +133,6 @@ async function tryLoadPDFWithFallbacks(
   
   const attempts: { method: string; config: any }[] = [
     {
-      method: 'standard_load_with_worker',
-      config: {
-        data: arrayBuffer,
-        useWorkerFetch: false,
-        isEvalSupported: false,
-        useSystemFonts: true,
-      }
-    },
-    {
-      method: 'load_with_recovery_worker',
-      config: {
-        data: arrayBuffer,
-        useWorkerFetch: false,
-        isEvalSupported: false,
-        useSystemFonts: true,
-        stopAtErrors: false,
-        disableFontFace: true,
-      }
-    },
-    {
-      method: 'load_ignore_errors_worker',
-      config: {
-        data: arrayBuffer,
-        useWorkerFetch: false,
-        isEvalSupported: false,
-        useSystemFonts: true,
-        stopAtErrors: false,
-        disableFontFace: true,
-        verbosity: 0,
-      }
-    },
-    {
       method: 'standard_load_no_worker',
       config: {
         data: arrayBuffer,
@@ -183,6 +151,19 @@ async function tryLoadPDFWithFallbacks(
         useSystemFonts: true,
         stopAtErrors: false,
         disableFontFace: true,
+        disableWorker: true,
+      }
+    },
+    {
+      method: 'load_ignore_errors_no_worker',
+      config: {
+        data: arrayBuffer,
+        useWorkerFetch: false,
+        isEvalSupported: false,
+        useSystemFonts: true,
+        stopAtErrors: false,
+        disableFontFace: true,
+        verbosity: 0,
         disableWorker: true,
       }
     },
@@ -219,7 +200,7 @@ async function tryLoadPDFWithFallbacks(
         duration: Date.now() - attemptStart
       })
       
-      diagnostic.autoRepairUsed = attempt.method !== 'standard_load_with_worker' ? attempt.method : undefined
+      diagnostic.autoRepairUsed = attempt.method !== 'standard_load_no_worker' ? attempt.method : undefined
       
       return pdf
     } catch (error: any) {
