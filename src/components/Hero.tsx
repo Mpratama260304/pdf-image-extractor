@@ -18,7 +18,7 @@ export function Hero({ onGetStarted }: HeroProps) {
         >
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full glass-effect text-accent text-sm font-medium mb-4">
             <Sparkle weight="fill" className="w-4 h-4" />
-            <span>Client-Side Processing</span>
+            <span>Fast & Secure Processing</span>
           </div>
 
           <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight leading-tight">
@@ -30,8 +30,8 @@ export function Hero({ onGetStarted }: HeroProps) {
           </h1>
 
           <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-            Upload any PDF document and extract all embedded images instantly. 
-            No servers, no uploads — everything happens securely in your browser.
+            Upload any PDF document and extract all embedded images instantly.
+            Fast server-side processing with shareable results and easy downloads.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
@@ -52,9 +52,9 @@ export function Hero({ onGetStarted }: HeroProps) {
             className="pt-12 grid grid-cols-1 md:grid-cols-3 gap-6 max-w-3xl mx-auto"
           >
             {[
-              { icon: '🚀', title: 'Lightning Fast', desc: 'Process PDFs in seconds with optimized rendering' },
-              { icon: '🔒', title: 'Fully Private', desc: 'Files never leave your device - 100% client-side' },
-              { icon: '🛡️', title: 'Robust & Safe', desc: 'Smart error handling with diagnostic reports' },
+              { icon: '🚀', title: 'Lightning Fast', desc: 'Process PDFs in seconds with optimized server rendering' },
+              { icon: '🔗', title: 'Shareable Links', desc: 'Get instant share links to access your results anywhere' },
+              { icon: '📦', title: 'Easy Download', desc: 'Download individual images or everything as a ZIP' },
             ].map((feature, i) => (
               <motion.div
                 key={i}

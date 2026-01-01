@@ -7,11 +7,15 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies
 node_modules
+
+# Build outputs
 dist
 dist-ssr
 *-dist
 *.local
+server/dist
 
 # Editor directories and files
 .vscode/*
@@ -24,11 +28,32 @@ dist-ssr
 *.sln
 *.sw?
 
+# Environment files (DO NOT COMMIT SECRETS)
 .env
+.env.local
+.env.*.local
+
+# Agent/eval reports
 **/agent-eval-report*
 packages
 pids
+
+# Storage directory (contains extracted images)
+storage/
+
+# SQLite database files
+*.db
+*.db-journal
+server/prisma/*.db
+server/prisma/*.db-journal
+
+# Keep prisma migrations
+!server/prisma/migrations/
+
+# Misc
 .file-manifest
 .devcontainer/
-
 .spark-workbench-id
+
+# Docker
+.docker

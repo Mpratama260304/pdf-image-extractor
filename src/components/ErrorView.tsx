@@ -1,15 +1,13 @@
 import { motion } from 'framer-motion'
-import { Warning, Download, ArrowLeft, Info } from '@phosphor-icons/react'
+import { Warning, ArrowLeft, Info } from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { DiagnosticInfo, downloadDiagnostic } from '@/lib/pdf-extractor'
 import { Badge } from '@/components/ui/badge'
 
 interface ErrorViewProps {
   errorCode: string
   errorMessage: string
-  diagnostic?: DiagnosticInfo
   onRetry: () => void
   onBack: () => void
 }
@@ -111,14 +109,8 @@ const errorMessages: Record<string, { title: string; description: string; tips: 
   }
 }
 
-export function ErrorView({ errorCode, errorMessage, diagnostic, onRetry, onBack }: ErrorViewProps) {
+export function ErrorView({ errorCode, errorMessage, onRetry, onBack }: ErrorViewProps) {
   const errorInfo = errorMessages[errorCode] || errorMessages.UNKNOWN_ERROR
-
-  const handleDownloadDiagnostic = () => {
-    if (diagnostic) {
-      downloadDiagnostic(diagnostic)
-    }
-  }
 
   return (
     <motion.div
@@ -155,87 +147,10 @@ export function ErrorView({ errorCode, errorMessage, diagnostic, onRetry, onBack
             </AlertDescription>
           </Alert>
 
-          {diagnostic && (
-            <div className="space-y-3">
-              <h4 className="font-semibold text-sm">Informasi File:</h4>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div className="space-y-1">
-                  <p className="text-muted-foreground text-xs">Nama File</p>
-                  <p className="font-medium truncate">{diagnostic.originalFilename}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-muted-foreground text-xs">Ukuran</p>
-                  <p className="font-medium">{(diagnostic.fileSize / 1024 / 1024).toFixed(2)} MB</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-muted-foreground text-xs">Jumlah Halaman</p>
-                  <p className="font-medium">{diagnostic.pageCount || 'N/A'}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-muted-foreground text-xs">Durasi Proses</p>
-                  <p className="font-medium">{(diagnostic.duration / 1000).toFixed(2)}s</p>
-                </div>
-                {diagnostic.pdfVersion && (
-                  <div className="space-y-1">
-                    <p className="text-muted-foreground text-xs">Versi PDF</p>
-                    <p className="font-medium font-mono">{diagnostic.pdfVersion}</p>
-                  </div>
-                )}
-                {diagnostic.fileMd5 && (
-                  <div className="space-y-1">
-                    <p className="text-muted-foreground text-xs">File Hash (SHA-256)</p>
-                    <p className="font-medium font-mono text-xs truncate">{diagnostic.fileMd5.substring(0, 16)}...</p>
-                  </div>
-                )}
-              </div>
-
-              {diagnostic.autoRepairUsed && (
-                <Alert className="bg-accent/10 border-accent/30">
-                  <Info className="w-4 h-4 text-accent" />
-                  <AlertDescription className="text-sm">
-                    <span className="font-semibold">Auto-Repair Digunakan:</span> {diagnostic.autoRepairUsed}
-                  </AlertDescription>
-                </Alert>
-              )}
-
-              {diagnostic.attempts.length > 0 && (
-                <div className="space-y-2 pt-2">
-                  <h4 className="font-semibold text-sm">Metode yang Dicoba:</h4>
-                  <div className="space-y-1 max-h-32 overflow-y-auto">
-                    {diagnostic.attempts.map((attempt, i) => (
-                      <div key={i} className="flex items-start gap-2 text-xs">
-                        <span className={attempt.success ? 'text-green-500' : 'text-red-500'}>
-                          {attempt.success ? '✓' : '✗'}
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <span className="text-muted-foreground">{attempt.method}</span>
-                          {attempt.duration !== undefined && (
-                            <span className="text-muted-foreground/70"> ({attempt.duration}ms)</span>
-                          )}
-                          {attempt.imageCount !== undefined && (
-                            <span className="text-muted-foreground"> - {attempt.imageCount} gambar</span>
-                          )}
-                          {attempt.error && (
-                            <div className="text-red-400/80 text-xs mt-0.5 truncate" title={attempt.error}>
-                              {attempt.error}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
           <div className="space-y-3">
             <h4 className="font-semibold text-sm">Saran Perbaikan:</h4>
             <ul className="space-y-2">
-              {(diagnostic?.recommendations && diagnostic.recommendations.length > 0 
-                ? diagnostic.recommendations 
-                : errorInfo.tips
-              ).map((tip, i) => (
+              {errorInfo.tips.map((tip, i) => (
                 <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
                   <span className="text-accent shrink-0">•</span>
                   <span>{tip}</span>
@@ -249,12 +164,6 @@ export function ErrorView({ errorCode, errorMessage, diagnostic, onRetry, onBack
               <ArrowLeft weight="bold" className="w-4 h-4 mr-2" />
               Coba File Lain
             </Button>
-            {diagnostic && (
-              <Button onClick={handleDownloadDiagnostic} className="flex-1" variant="secondary">
-                <Download weight="bold" className="w-4 h-4 mr-2" />
-                Download Diagnostic
-              </Button>
-            )}
           </div>
 
           <Button onClick={onBack} variant="ghost" className="w-full">

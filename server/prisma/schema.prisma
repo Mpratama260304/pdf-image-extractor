@@ -1,0 +1,67 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model AdminUser {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Extraction {
+  id               String      @id @default(cuid())
+  originalFilename String
+  sizeBytes        Int
+  sha256           String      @unique
+  pageCount        Int
+  imageCount       Int
+  status           String      @default("pending") // pending, processing, completed, failed
+  errorMessage     String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  expiresAt        DateTime?
+  
+  images           Image[]
+  shareLinks       ShareLink[]
+}
+
+model Image {
+  id           String     @id @default(cuid())
+  extractionId String
+  filename     String
+  width        Int
+  height       Int
+  mimeType     String
+  sizeBytes    Int
+  pageNumber   Int
+  sortOrder    Int
+  createdAt    DateTime   @default(now())
+  
+  extraction   Extraction @relation(fields: [extractionId], references: [id], onDelete: Cascade)
+  
+  @@index([extractionId])
+}
+
+model ShareLink {
+  id             String     @id @default(cuid())
+  extractionId   String
+  token          String     @unique
+  isPublic       Boolean    @default(true)
+  createdAt      DateTime   @default(now())
+  lastAccessedAt DateTime?
+  accessCount    Int        @default(0)
+  expiresAt      DateTime?
+  
+  extraction     Extraction @relation(fields: [extractionId], references: [id], onDelete: Cascade)
+  
+  @@index([extractionId])
+  @@index([token])
+}

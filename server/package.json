@@ -1,0 +1,40 @@
+{
+  "name": "pdf-image-extractor-server",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "tsx src/seed.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/cors": "^10.1.0",
+    "@fastify/jwt": "^9.1.0",
+    "@fastify/multipart": "^9.3.0",
+    "@fastify/rate-limit": "^10.3.0",
+    "@fastify/static": "^8.3.0",
+    "@napi-rs/canvas": "^0.1.88",
+    "@prisma/client": "^6.19.1",
+    "archiver": "^7.0.1",
+    "argon2": "^0.41.1",
+    "dotenv": "^16.6.1",
+    "fastify": "^5.6.2",
+    "node-cron": "^3.0.3",
+    "pdfjs-dist": "^4.10.38",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/archiver": "^6.0.4",
+    "@types/node": "^22.19.3",
+    "@types/node-cron": "^3.0.11",
+    "prisma": "^6.19.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.3"
+  }
+}

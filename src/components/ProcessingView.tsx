@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { CircleNotch, CloudArrowUp, Desktop } from '@phosphor-icons/react'
+import { CircleNotch, CloudArrowUp } from '@phosphor-icons/react'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 
@@ -10,14 +10,11 @@ interface ProcessingViewProps {
 
 export function ProcessingView({ progress, status }: ProcessingViewProps) {
   const getStage = () => {
-    if (progress < 20) return 'Validating'
+    if (progress < 20) return 'Uploading'
     if (progress < 70) return 'Extracting'
     if (progress < 95) return 'Finalizing'
     return 'Complete'
   }
-
-  const isServerMode = status.toLowerCase().includes('server') || 
-                       status.toLowerCase().includes('uploading')
 
   return (
     <motion.div
@@ -44,19 +41,10 @@ export function ProcessingView({ progress, status }: ProcessingViewProps) {
           </div>
           <p className="text-muted-foreground">{status}</p>
           
-          {isServerMode && (
-            <div className="flex items-center justify-center gap-2 text-xs text-accent">
-              <CloudArrowUp weight="bold" className="w-4 h-4" />
-              <span>Server-side processing</span>
-            </div>
-          )}
-          
-          {!isServerMode && progress > 20 && (
-            <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
-              <Desktop weight="bold" className="w-4 h-4" />
-              <span>Client-side extraction</span>
-            </div>
-          )}
+          <div className="flex items-center justify-center gap-2 text-xs text-accent">
+            <CloudArrowUp weight="bold" className="w-4 h-4" />
+            <span>Processing on server</span>
+          </div>
         </div>
 
         <div className="space-y-2">

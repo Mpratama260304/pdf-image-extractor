@@ -1,0 +1,62 @@
+# Docker Compose for PDF Image Extractor
+# Local development and production parity
+
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${PORT:-3001}:${PORT:-3001}"
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - PORT=${PORT:-3001}
+      - HOST=0.0.0.0
+      - DATABASE_URL=${DATABASE_URL:-file:/data/db/prod.db}
+      - STORAGE_DIR=/data/storage
+      - JWT_SECRET=${JWT_SECRET}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - EXTRACTION_EXPIRY_DAYS=${EXTRACTION_EXPIRY_DAYS:-7}
+      - ENABLE_AUTO_CLEANUP=${ENABLE_AUTO_CLEANUP:-true}
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-200}
+      - MAX_PAGES=${MAX_PAGES:-500}
+    volumes:
+      - app_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:${PORT:-3001}/api/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Uncomment below to use PostgreSQL instead of SQLite
+  # postgres:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_USER: ${POSTGRES_USER:-pdfextractor}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+  #     POSTGRES_DB: ${POSTGRES_DB:-pdfextractor}
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pdfextractor}"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #
+  # When using PostgreSQL, update the app service:
+  # - DATABASE_URL=postgresql://${POSTGRES_USER:-pdfextractor}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-pdfextractor}
+  # - depends_on:
+  #     postgres:
+  #       condition: service_healthy
+
+volumes:
+  app_data:
+    driver: local
+  # postgres_data:
+  #   driver: local

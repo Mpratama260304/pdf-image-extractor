@@ -1,63 +1,218 @@
 # PDF Image Extractor
 
-A powerful, client-side PDF image extraction tool built with React, TypeScript, and PDF.js.
+A full-stack PDF image extraction application with server-side processing, persistent storage, and public share links. Built with React, TypeScript, Fastify, and Prisma.
 
 ## ✨ Features
 
-- 🖼️ **Extract embedded images** from PDF documents
-- 📄 **Rasterize pages** to high-quality images when no embedded images exist
-- 🔄 **Multiple fallback strategies** for maximum compatibility
-- 📊 **Detailed diagnostics** for troubleshooting
-- 🎨 **Beautiful UI** with smooth animations
-- 💾 **Download images** individually or as a ZIP file
-- 📱 **Responsive design** works on desktop and mobile
-- 🚀 **100% client-side** - no server required, no data upload
-
-## 🎯 Recent Fixes (Emergency Update)
-
-### ✅ ALL_METHODS_FAILED Fixed
-
-**Problems solved:**
-- ❌ Worker file 404 errors
-- ❌ Server endpoint 404 errors  
-- ❌ CDN dependencies
-- ❌ No fallback strategies
-
-**Solutions implemented:**
-- ✅ Worker bundled locally via Vite
-- ✅ Automatic `disableWorker` fallback
-- ✅ No server dependencies
-- ✅ 6-step fallback chain
-- ✅ Clear diagnostic information
-
-See [EMERGENCY_FIX_COMPLETE.md](./EMERGENCY_FIX_COMPLETE.md) for details.
+- 🖼️ **Server-side PDF image extraction** - Reliable Node.js processing with `pdfjs-dist` and `@napi-rs/canvas`
+- 🔗 **Public share links** - Share extracted images via URL (like Google Drive/Mediafire)
+- 💾 **Persistent storage** - Images and ZIP files saved on server
+- 👤 **Admin panel** - Manage extractions, view stats, delete files
+- 📦 **ZIP downloads** - Download all images as a ZIP archive
+- 🔒 **Secure** - Password hashing, JWT auth, rate limiting
+- 🧹 **Auto cleanup** - Scheduled deletion of expired extractions
+- 📱 **Responsive UI** - Works on desktop and mobile
 
 ## 🚀 Quick Start
 
+### Prerequisites
+
+- Node.js 18+
+- npm 9+
+
+### Setup
+
 ```bash
-# Install dependencies
-npm install
+# Clone and install dependencies
+git clone <repo-url>
+cd pdf-image-extractor
 
-# Start development server
+# Install all dependencies (root + server)
+npm run setup
+
+# Copy and configure environment variables
+cp .env.example .env
+# Edit .env with your settings (especially JWT_SECRET!)
+
+# Start development servers
 npm run dev
+```
 
-# Build for production
+The app will be running at:
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:3001
+
+### Production Build
+
+```bash
+# Build both frontend and server
 npm run build
 
-# Preview production build
-npm run preview
+# Start production server (serves both API and static files)
+npm start
 ```
 
-## 🧪 Testing After Deploy
+## 📁 Project Structure
 
-See [POST_DEPLOY_TESTS.md](./POST_DEPLOY_TESTS.md) for comprehensive testing checklist.
+```
+pdf-image-extractor/
+├── src/                    # Frontend React app
+│   ├── components/         # UI components
+│   ├── contexts/           # React contexts (Auth)
+│   ├── lib/                # API client, utilities
+│   ├── pages/              # Route pages
+│   └── App.tsx             # Main app with routing
+├── server/                 # Backend Node.js server
+│   ├── src/
+│   │   ├── config/         # Environment config
+│   │   ├── lib/            # Prisma client
+│   │   ├── routes/         # API routes
+│   │   ├── services/       # Business logic
+│   │   └── index.ts        # Server entry
+│   └── prisma/
+│       └── schema.prisma   # Database schema
+├── storage/                # Extracted files (gitignored)
+└── dist/                   # Production build output
+```
 
-**Quick verification:**
+## 🔐 Environment Variables
+
 ```bash
-# Check worker file is accessible
-curl -I https://YOUR_DOMAIN/assets/pdf.worker.min.mjs
-# Expected: HTTP/2 200
+# Server
+PORT=3001
+HOST=0.0.0.0
+NODE_ENV=development
+
+# Database
+DATABASE_URL="file:./dev.db"
+
+# Admin (for initial seed)
+ADMIN_EMAIL=admin@example.com
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=your-secure-password
+
+# JWT (generate: node -e "console.log(require('crypto').randomBytes(64).toString('hex'))")
+JWT_SECRET=your-super-secret-key-min-32-chars
+JWT_EXPIRES_IN=7d
+
+# Storage
+STORAGE_DIR=./storage
+
+# Limits
+MAX_FILE_SIZE_MB=200
+MAX_PAGES=500
+
+# Public URL
+PUBLIC_BASE_URL=http://localhost:3001
+
+# Cleanup
+EXTRACTION_EXPIRY_DAYS=7
+ENABLE_AUTO_CLEANUP=true
 ```
+
+## 📚 API Endpoints
+
+### Public
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/extractions` | Upload PDF and extract images |
+| GET | `/api/shares/:token` | Get share link details |
+| GET | `/api/shares/:token/download.zip` | Download ZIP file |
+| GET | `/api/shares/:token/images/:filename` | Get image file |
+| GET | `/api/health` | Health check |
+
+### Admin (requires auth)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/admin/login` | Login with username/email + password |
+| POST | `/api/admin/logout` | Logout |
+| GET | `/api/admin/me` | Get current user |
+| GET | `/api/admin/stats` | Dashboard statistics |
+| GET | `/api/admin/extractions` | List extractions (paginated) |
+| GET | `/api/admin/extractions/:id` | Get extraction details |
+| DELETE | `/api/admin/extractions/:id` | Delete extraction |
+| PATCH | `/api/admin/shares/:token` | Update share link |
+| POST | `/api/admin/cleanup` | Run cleanup now |
+
+## 🛣️ Frontend Routes
+
+| Path | Description |
+|------|-------------|
+| `/` | Home page - upload PDF |
+| `/s/:token` | Public share page |
+| `/admin/login` | Admin login |
+| `/admin` | Admin dashboard |
+
+## 🗄️ Database Schema
+
+```prisma
+model AdminUser {
+  id           String   @id
+  email        String   @unique
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime
+}
+
+model Extraction {
+  id               String
+  originalFilename String
+  sizeBytes        Int
+  sha256           String   @unique
+  pageCount        Int
+  imageCount       Int
+  status           String   // pending, processing, completed, failed
+  expiresAt        DateTime?
+  images           Image[]
+  shareLinks       ShareLink[]
+}
+
+model Image {
+  id           String
+  extractionId String
+  filename     String
+  width        Int
+  height       Int
+  mimeType     String
+  sizeBytes    Int
+  pageNumber   Int
+}
+
+model ShareLink {
+  id           String
+  extractionId String
+  token        String   @unique
+  isPublic     Boolean
+  accessCount  Int
+  expiresAt    DateTime?
+}
+```
+
+## 🛠️ Scripts
+
+```bash
+npm run dev          # Start dev servers (frontend + backend)
+npm run build        # Build for production
+npm start            # Start production server
+npm run setup        # Initial setup (install deps + db)
+npm run db:migrate   # Run database migrations
+npm run db:seed      # Seed admin user
+```
+
+## 🔒 Security Features
+
+- Password hashing with Argon2
+- JWT authentication with HTTP-only cookies
+- Rate limiting on uploads
+- File size and page count limits
+- Sanitized filenames (prevents path traversal)
+- No credentials in source code
+
+## 📄 License
+
+MIT
 
 ## 📚 Documentation
 
