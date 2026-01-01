@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { existsSync, mkdirSync, readFileSync } from 'fs';
 
-import { env } from './config/env.js';
+import { env, generateSecureSecret, writeSecretFile, readSecretFile, ensureDir } from './config/env.js';
 import prisma from './lib/prisma.js';
 import { publicRoutes } from './routes/public.js';
 import { adminRoutes } from './routes/admin.js';
@@ -49,22 +49,88 @@ function ensureStorageDir() {
   }
 }
 
-// Seed admin user from environment variables
+// Seed admin user from environment variables or create default
 async function seedAdminUser() {
   const hasAdmin = await adminExists();
   
-  if (!hasAdmin && env.ADMIN_EMAIL && env.ADMIN_USERNAME && env.ADMIN_PASSWORD) {
-    console.log('Seeding initial admin user...');
+  if (hasAdmin) {
+    // Admin already exists, nothing to do
+    return;
+  }
+  
+  // Try to use environment variables first
+  if (env.ADMIN_EMAIL && env.ADMIN_USERNAME && env.ADMIN_PASSWORD) {
+    console.log('Seeding initial admin user from environment...');
     
     try {
       const admin = await createAdmin(env.ADMIN_EMAIL, env.ADMIN_USERNAME, env.ADMIN_PASSWORD);
-      console.log(`Admin user created: ${admin.email} (${admin.username})`);
+      console.log(`✓ Admin user created: ${admin.email} (${admin.username})`);
     } catch (error) {
       console.error('Failed to seed admin user:', error);
     }
-  } else if (!hasAdmin) {
-    console.warn('No admin user exists and ADMIN_* env vars not set. Admin login will be unavailable.');
+    return;
   }
+  
+  // No env vars provided - create default admin with random password
+  console.log('');
+  console.log('='.repeat(70));
+  console.log('Creating default admin user...');
+  console.log('='.repeat(70));
+  
+  const defaultEmail = 'admin@local';
+  const defaultUsername = 'admin';
+  
+  // Check if we already have a persisted initial password
+  let initialPassword = readSecretFile('admin_initial_password.txt');
+  let isNewPassword = false;
+  
+  if (!initialPassword) {
+    // Generate a new secure password
+    initialPassword = generateSecureSecret(16); // 32 hex chars = strong password
+    isNewPassword = true;
+  }
+  
+  try {
+    const admin = await createAdmin(defaultEmail, defaultUsername, initialPassword);
+    
+    // Persist the password to /data/secrets
+    if (isNewPassword) {
+      const saved = writeSecretFile('admin_initial_password.txt', initialPassword);
+      if (saved) {
+        console.log('');
+        console.log('✓ Default admin user created:');
+        console.log(`   Email:    ${admin.email}`);
+        console.log(`   Username: ${admin.username}`);
+        console.log('');
+        console.log('   Initial password saved to: /data/secrets/admin_initial_password.txt');
+        console.log('   ⚠️  Please change this password after first login!');
+        console.log('');
+      } else {
+        // Couldn't persist - print password once (security tradeoff for usability)
+        console.log('');
+        console.log('✓ Default admin user created:');
+        console.log(`   Email:    ${admin.email}`);
+        console.log(`   Username: ${admin.username}`);
+        console.log(`   Password: ${initialPassword}`);
+        console.log('');
+        console.warn('   ⚠️  WARNING: Could not persist password to /data/secrets/');
+        console.warn('      Please save this password and change it after login!');
+        console.log('');
+      }
+    } else {
+      console.log('');
+      console.log('✓ Admin user restored from persisted credentials');
+      console.log(`   Email:    ${admin.email}`);
+      console.log(`   Username: ${admin.username}`);
+      console.log('   Password: see /data/secrets/admin_initial_password.txt');
+      console.log('');
+    }
+  } catch (error) {
+    console.error('Failed to create default admin user:', error);
+  }
+  
+  console.log('='.repeat(70));
+  console.log('');
 }
 
 async function buildServer() {

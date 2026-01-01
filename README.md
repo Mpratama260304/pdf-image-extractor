@@ -129,6 +129,84 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 **Files disappearing after redeploy:**
 - Add a persistent volume mounted to `/data`
 
+## 🐳 Deploy on PhalaCloud (Compose-Only)
+
+PhalaCloud only supports `docker-compose.yml` deployment (no `.env` file loading). This app is fully compatible with zero-config deployment.
+
+### Quick Deploy
+
+1. **Push to GitHub** (or any Git provider)
+2. **Deploy on PhalaCloud**
+   - Select your repository
+   - PhalaCloud will use `docker-compose.yml` automatically
+   - No environment variables needed for basic deployment!
+
+### How It Works (Zero-Config)
+
+The app automatically handles missing configuration:
+
+| Component | Auto-Generated | Persisted Location |
+|-----------|---------------|-------------------|
+| JWT Secret | ✅ 96-char hex | `/data/secrets/jwt_secret` |
+| Admin User | ✅ Random password | `/data/secrets/admin_initial_password.txt` |
+| Database | ✅ SQLite | `/data/db/prod.db` |
+| Storage | ✅ Default | `/data/storage/` |
+
+**On first boot:**
+1. JWT secret is generated and saved to `/data/secrets/jwt_secret`
+2. Default admin is created (username: `admin`, email: `admin@local`)
+3. Random password is saved to `/data/secrets/admin_initial_password.txt`
+4. SQLite database is initialized at `/data/db/prod.db`
+
+**On subsequent restarts:**
+- All secrets and data are loaded from the persistent `/data` volume
+- Sessions remain valid (same JWT secret)
+- Admin login works (same credentials)
+
+### Retrieve Admin Password
+
+After first deployment, get your admin password:
+
+```bash
+# Via PhalaCloud console/SSH:
+cat /data/secrets/admin_initial_password.txt
+```
+
+Then login at `https://your-app.phala.cloud/admin/login` with:
+- Username: `admin`
+- Password: (from the file above)
+
+**⚠️ Change your password immediately via Admin Settings!**
+
+### Optional: Set Explicit Credentials
+
+If you prefer explicit credentials, modify `docker-compose.yml`:
+
+```yaml
+services:
+  app:
+    environment:
+      # Uncomment and set these:
+      - JWT_SECRET=your-secure-secret-at-least-32-chars
+      - ADMIN_EMAIL=admin@example.com
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=your-secure-password
+```
+
+### PhalaCloud Volume Persistence
+
+The `docker-compose.yml` uses a named volume `app_data` mounted to `/data`:
+
+```yaml
+volumes:
+  - app_data:/data
+```
+
+This persists:
+- `/data/db/` - SQLite database
+- `/data/storage/` - Uploaded files, extractions, branding
+- `/data/secrets/` - JWT secret, admin password
+
 ## 📁 Project Structure
 
 ```
