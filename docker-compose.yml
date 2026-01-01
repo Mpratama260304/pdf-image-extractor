@@ -15,89 +15,90 @@ version: '3.8'
 
 services:
   app:
-    image: mpratamamail/pdf-image-extractor:latest
-    ports:
-      - "3001:3001"
-    environment:
-      # Core settings (required)
-      - NODE_ENV=production
-      - PORT=3001
-      - HOST=0.0.0.0
-      
-      # Database (SQLite in /data for persistence)
-      - DATABASE_URL=file:/data/db/prod.db
-      
-      # Storage (persisted in /data)
-      - STORAGE_DIR=/data/storage
-      
-      # JWT Secret (OPTIONAL - auto-generated if not set)
-      # Uncomment and set for explicit secret management:
-      # - JWT_SECRET=your-secure-secret-at-least-32-chars
-      
-      # Admin credentials (OPTIONAL - auto-created if not set)
-      # If not provided, default admin created with random password
-      # saved to /data/secrets/admin_initial_password.txt
-      # Uncomment to set explicit credentials:
-      # - ADMIN_EMAIL=admin@example.com
-      # - ADMIN_USERNAME=admin
-      # - ADMIN_PASSWORD=your-secure-password
-      
-      # File processing limits
-      - MAX_FILE_SIZE_MB=200
-      - MAX_PAGES=500
-      
-      # Cleanup settings
-      - EXTRACTION_EXPIRY_DAYS=7
-      - ENABLE_AUTO_CLEANUP=true
-      
-      # Branding upload limits
-      - ADMIN_LOGO_MAX_SIZE_MB=2
-      - FAVICON_MAX_SIZE_MB=1
-    volumes:
-      # Persistent data volume - contains:
-      # - /data/db/       SQLite database
-      # - /data/storage/  Uploaded files and extractions
-      # - /data/secrets/  Auto-generated secrets (jwt_secret, admin_initial_password.txt)
-      - app_data:/data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/api/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
+      image: mpratamamail/pdf-image-extractor:latest
+          ports:
+                - "3001:3001"
+                    environment:
+                          # Core settings (required)
+                                - NODE_ENV=production
+                                      - PORT=3001
+                                            - HOST=0.0.0.0
+                                                  
+                                                        # Database (SQLite in /data for persistence)
+                                                              - DATABASE_URL=file:/data/db/prod.db
+                                                                    
+                                                                          # Storage (persisted in /data)
+                                                                                - STORAGE_DIR=/data/storage
+                                                                                      
+                                                                                            # JWT Secret (OPTIONAL - auto-generated if not set)
+                                                                                                  # Uncomment and set for explicit secret management:
+                                                                                                        # - JWT_SECRET=your-secure-secret-at-least-32-chars
+                                                                                                              
+                                                                                                                    # Admin credentials (OPTIONAL - auto-created if not set)
+                                                                                                                          # If not provided, default admin created with random password
+                                                                                                                                # saved to /data/secrets/admin_initial_password.txt
+                                                                                                                                      # Uncomment to set explicit credentials:
+                                                                                                                                            # - ADMIN_EMAIL=admin@example.com
+                                                                                                                                                  # - ADMIN_USERNAME=admin
+                                                                                                                                                        # - ADMIN_PASSWORD=your-secure-password
+                                                                                                                                                              
+                                                                                                                                                                    # File processing limits
+                                                                                                                                                                          - MAX_FILE_SIZE_MB=200
+                                                                                                                                                                                - MAX_PAGES=500
+                                                                                                                                                                                      
+                                                                                                                                                                                            # Cleanup settings
+                                                                                                                                                                                                  - EXTRACTION_EXPIRY_DAYS=7
+                                                                                                                                                                                                        - ENABLE_AUTO_CLEANUP=true
+                                                                                                                                                                                                              
+                                                                                                                                                                                                                    # Branding upload limits
+                                                                                                                                                                                                                          - ADMIN_LOGO_MAX_SIZE_MB=2
+                                                                                                                                                                                                                                - FAVICON_MAX_SIZE_MB=1
+                                                                                                                                                                                                                                    volumes:
+                                                                                                                                                                                                                                          # Persistent data volume - contains:
+                                                                                                                                                                                                                                                # - /data/db/       SQLite database
+                                                                                                                                                                                                                                                      # - /data/storage/  Uploaded files and extractions
+                                                                                                                                                                                                                                                            # - /data/secrets/  Auto-generated secrets (jwt_secret, admin_initial_password.txt)
+                                                                                                                                                                                                                                                                  - app_data:/data
+                                                                                                                                                                                                                                                                      restart: unless-stopped
+                                                                                                                                                                                                                                                                          healthcheck:
+                                                                                                                                                                                                                                                                                test: ["CMD", "node", "-e", "fetch('http://localhost:3001/api/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
+                                                                                                                                                                                                                                                                                      interval: 30s
+                                                                                                                                                                                                                                                                                            timeout: 10s
+                                                                                                                                                                                                                                                                                                  retries: 3
+                                                                                                                                                                                                                                                                                                        start_period: 15s
 
-volumes:
-  app_data:
-    driver: local
+                                                                                                                                                                                                                                                                                                        volumes:
+                                                                                                                                                                                                                                                                                                          app_data:
+                                                                                                                                                                                                                                                                                                              driver: local
 
-# ===========================================
-# PostgreSQL Configuration (Optional)
-# ===========================================
-# Uncomment below to use PostgreSQL instead of SQLite
-# 
-# services:
-#   app:
-#     environment:
-#       - DATABASE_URL=postgresql://pdfextractor:changeme@postgres:5432/pdfextractor
-#     depends_on:
-#       postgres:
-#         condition: service_healthy
-#
-#   postgres:
-#     image: postgres:16-alpine
-#     environment:
-#       - POSTGRES_USER=pdfextractor
-#       - POSTGRES_PASSWORD=changeme
-#       - POSTGRES_DB=pdfextractor
-#     volumes:
-#       - postgres_data:/var/lib/postgresql/data
-#     healthcheck:
-#       test: ["CMD-SHELL", "pg_isready -U pdfextractor"]
-#       interval: 10s
-#       timeout: 5s
-#       retries: 5
-#
-# volumes:
-#   postgres_data:
-#     driver: local
+                                                                                                                                                                                                                                                                                                              # ===========================================
+                                                                                                                                                                                                                                                                                                              # PostgreSQL Configuration (Optional)
+                                                                                                                                                                                                                                                                                                              # ===========================================
+                                                                                                                                                                                                                                                                                                              # Uncomment below to use PostgreSQL instead of SQLite
+                                                                                                                                                                                                                                                                                                              # 
+                                                                                                                                                                                                                                                                                                              # services:
+                                                                                                                                                                                                                                                                                                              #   app:
+                                                                                                                                                                                                                                                                                                              #     environment:
+                                                                                                                                                                                                                                                                                                              #       - DATABASE_URL=postgresql://pdfextractor:changeme@postgres:5432/pdfextractor
+                                                                                                                                                                                                                                                                                                              #     depends_on:
+                                                                                                                                                                                                                                                                                                              #       postgres:
+                                                                                                                                                                                                                                                                                                              #         condition: service_healthy
+                                                                                                                                                                                                                                                                                                              #
+                                                                                                                                                                                                                                                                                                              #   postgres:
+                                                                                                                                                                                                                                                                                                              #     image: postgres:16-alpine
+                                                                                                                                                                                                                                                                                                              #     environment:
+                                                                                                                                                                                                                                                                                                              #       - POSTGRES_USER=pdfextractor
+                                                                                                                                                                                                                                                                                                              #       - POSTGRES_PASSWORD=changeme
+                                                                                                                                                                                                                                                                                                              #       - POSTGRES_DB=pdfextractor
+                                                                                                                                                                                                                                                                                                              #     volumes:
+                                                                                                                                                                                                                                                                                                              #       - postgres_data:/var/lib/postgresql/data
+                                                                                                                                                                                                                                                                                                              #     healthcheck:
+                                                                                                                                                                                                                                                                                                              #       test: ["CMD-SHELL", "pg_isready -U pdfextractor"]
+                                                                                                                                                                                                                                                                                                              #       interval: 10s
+                                                                                                                                                                                                                                                                                                              #       timeout: 5s
+                                                                                                                                                                                                                                                                                                              #       retries: 5
+                                                                                                                                                                                                                                                                                                              #
+                                                                                                                                                                                                                                                                                                              # volumes:
+                                                                                                                                                                                                                                                                                                              #   postgres_data:
+                                                                                                                                                                                                                                                                                                              #     driver: local
+                                                                                                                                                                                                                                                                                                              

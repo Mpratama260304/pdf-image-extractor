@@ -8,6 +8,7 @@ import cors from '@fastify/cors';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { existsSync, mkdirSync, readFileSync } from 'fs';
+import { randomBytes } from 'crypto';
 
 import { env, generateSecureSecret, writeSecretFile, readSecretFile, ensureDir } from './config/env.js';
 import prisma from './lib/prisma.js';
@@ -134,6 +135,82 @@ async function seedAdminUser() {
 }
 
 async function buildServer() {
+  // ==========================================================================
+  // PART B & C: Request ID generation and global error handling
+  // ==========================================================================
+  
+  // Add request ID to all requests
+  fastify.addHook('onRequest', async (request, reply) => {
+    const requestId = request.headers['x-request-id'] as string || 
+      `req_${Date.now()}_${randomBytes(4).toString('hex')}`;
+    request.requestId = requestId;
+    reply.header('x-request-id', requestId);
+  });
+  
+  // Type for Fastify errors with additional properties
+  interface FastifyError extends Error {
+    statusCode?: number;
+    code?: string;
+    validation?: unknown;
+  }
+  
+  // Global error handler - ensure all errors return JSON for /api routes
+  fastify.setErrorHandler(async (err: FastifyError, request, reply) => {
+    const requestId = request.requestId || 'unknown';
+    const isApiRoute = request.url.startsWith('/api/');
+    
+    // Log error with request context
+    console.error(`[${requestId}] Error:`, {
+      url: request.url,
+      method: request.method,
+      error: err.message,
+      stack: err.stack,
+    });
+    
+    // Always return JSON for API routes
+    if (isApiRoute) {
+      let statusCode = err.statusCode || 500;
+      let errorCode = 'INTERNAL_ERROR';
+      let errorMessage = err.message || 'An unexpected error occurred';
+      
+      // Handle specific error types
+      if (err.code === 'FST_REQ_FILE_TOO_LARGE') {
+        statusCode = 413;
+        errorCode = 'FILE_TOO_LARGE';
+        errorMessage = `File size exceeds maximum of ${env.MAX_FILE_SIZE_MB}MB`;
+      } else if (err.code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+        statusCode = 413;
+        errorCode = 'PAYLOAD_TOO_LARGE';
+        errorMessage = `Request body exceeds maximum size`;
+      } else if (err.validation) {
+        statusCode = 400;
+        errorCode = 'VALIDATION_ERROR';
+        errorMessage = err.message;
+      } else if (statusCode === 429) {
+        errorCode = 'RATE_LIMITED';
+        errorMessage = 'Too many requests. Please try again later.';
+      } else if (statusCode >= 500) {
+        errorCode = 'SERVER_ERROR';
+        // Don't expose internal error details in production
+        if (!env.IS_DEVELOPMENT) {
+          errorMessage = 'An internal server error occurred';
+        }
+      }
+      
+      return reply.status(statusCode).send({
+        success: false,
+        error: {
+          code: errorCode,
+          message: errorMessage,
+          requestId,
+        },
+      });
+    }
+    
+    // For non-API routes, use default error handling
+    return reply.status(err.statusCode || 500).send(err.message);
+  });
+  
   // Register plugins
   await fastify.register(cors, {
     origin: env.IS_DEVELOPMENT ? true : false,
@@ -257,19 +334,42 @@ async function buildServer() {
     
     // SPA fallback - serve index.html for all non-API and non-asset routes
     fastify.setNotFoundHandler(async (request, reply: any) => {
-      // Don't serve index.html for API routes
+      const requestId = request.requestId || 'unknown';
+      
+      // Don't serve index.html for API routes - return JSON 404
       if (request.url.startsWith('/api/')) {
-        return reply.status(404).send({ success: false, error: 'Not found' });
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: 'NOT_FOUND',
+            message: 'API route not found',
+            requestId,
+          },
+        });
       }
       
       // Don't serve index.html for asset requests (they should 404 if not found)
       if (request.url.startsWith('/assets/')) {
-        return reply.status(404).send({ success: false, error: 'Asset not found' });
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Asset not found',
+            requestId,
+          },
+        });
       }
       
       // Don't serve index.html for branding routes (they have their own handlers)
       if (request.url.startsWith('/branding/')) {
-        return reply.status(404).send({ success: false, error: 'Branding file not found' });
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Branding file not found',
+            requestId,
+          },
+        });
       }
       
       // SPA fallback: serve index.html with injected metadata

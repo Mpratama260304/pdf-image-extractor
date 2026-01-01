@@ -12,6 +12,8 @@ A full-stack PDF image extraction application with server-side processing, persi
 - 🔒 **Secure** - Password hashing, JWT auth, rate limiting
 - 🧹 **Auto cleanup** - Scheduled deletion of expired extractions
 - 📱 **Responsive UI** - Works on desktop and mobile
+- ⚡ **Async processing** - Uploads return immediately (202), frontend polls for completion
+- 🛡️ **Robust error handling** - Never fails with "Unexpected token '<'" JSON parse errors
 
 ## 🚀 Quick Start
 
@@ -462,6 +464,36 @@ Content-Security-Policy:
 2. Download diagnostic JSON from error screen
 3. Look for which methods were attempted
 4. Try opening PDF in Adobe Reader and "Save As" to create clean copy
+
+### Proxy/Gateway Errors (502, 504, HTML responses)
+
+When deployed behind a proxy (PhalaCloud, Nginx, Cloudflare), you might see:
+- **502 Bad Gateway** - Server crashed or didn't respond
+- **504 Gateway Timeout** - Extraction took too long
+- **"Unexpected token '<'"** - Proxy returned HTML error page
+
+**Solutions:**
+
+1. **Request ID tracking**: Every API request gets an `x-request-id` header. Check server logs for the matching ID.
+
+2. **Download diagnostics**: When an error occurs, click "Download Diagnostic JSON" to get:
+   - Request timestamp, URL, method
+   - Response status, content-type
+   - Body snippet (first 2000 chars)
+   - Request ID for log correlation
+
+3. **Async processing**: Large PDFs use async extraction:
+   - Upload returns `202 Accepted` immediately
+   - Frontend polls `/api/extractions/:id` every 5 seconds
+   - Processing continues in background (up to 5 minutes)
+
+4. **File size limits**: 
+   - Default: 200MB (`MAX_FILE_SIZE_MB`)
+   - Proxy may have lower limits - check your reverse proxy config
+
+5. **Timeout limits**:
+   - Extraction timeout: 5 minutes
+   - If your proxy times out sooner, increase `proxy_read_timeout` (Nginx) or similar
 
 ## 📝 License
 

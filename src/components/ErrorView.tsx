@@ -1,13 +1,15 @@
 import { motion } from 'framer-motion'
-import { Warning, ArrowLeft, Info } from '@phosphor-icons/react'
+import { Warning, ArrowLeft, Info, DownloadSimple } from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
+import type { RequestDiagnostic } from '@/lib/api-client'
 
 interface ErrorViewProps {
   errorCode: string
   errorMessage: string
+  diagnostic?: RequestDiagnostic
   onRetry: () => void
   onBack: () => void
 }
@@ -97,6 +99,46 @@ const errorMessages: Record<string, { title: string; description: string; tips: 
       'Gunakan screenshot tool untuk capture halaman yang Anda butuhkan'
     ]
   },
+  TIMEOUT: {
+    title: 'Server Timeout',
+    description: 'Proses memakan waktu terlalu lama. File mungkin terlalu besar atau server sedang sibuk.',
+    tips: [
+      'Coba upload ulang dalam beberapa saat',
+      'Gunakan file PDF yang lebih kecil',
+      'Kompres PDF terlebih dahulu jika memungkinkan',
+      'Download diagnostic untuk detail teknis'
+    ]
+  },
+  HTML_RESPONSE: {
+    title: 'Reverse Proxy Error',
+    description: 'Server mengembalikan halaman HTML alih-alih data. Ini biasanya masalah proxy/gateway.',
+    tips: [
+      'Coba refresh halaman dan upload ulang',
+      'Periksa apakah file tidak terlalu besar (maksimal 200MB)',
+      'Coba lagi dalam beberapa saat',
+      'Download diagnostic untuk melaporkan ke administrator'
+    ]
+  },
+  NETWORK: {
+    title: 'Koneksi Error',
+    description: 'Gagal terhubung ke server. Periksa koneksi internet Anda.',
+    tips: [
+      'Pastikan koneksi internet stabil',
+      'Coba refresh halaman',
+      'Periksa apakah server tersedia',
+      'Gunakan jaringan lain jika memungkinkan'
+    ]
+  },
+  HTTP_ERROR: {
+    title: 'Server Error',
+    description: 'Server mengembalikan error. Coba lagi atau hubungi administrator.',
+    tips: [
+      'Coba upload ulang file',
+      'Pastikan file PDF valid dan tidak rusak',
+      'Download diagnostic untuk detail teknis',
+      'Hubungi administrator jika masalah berlanjut'
+    ]
+  },
   UNKNOWN_ERROR: {
     title: 'Kesalahan Tidak Diketahui',
     description: 'Terjadi kesalahan yang tidak terduga saat memproses PDF.',
@@ -109,8 +151,22 @@ const errorMessages: Record<string, { title: string; description: string; tips: 
   }
 }
 
-export function ErrorView({ errorCode, errorMessage, onRetry, onBack }: ErrorViewProps) {
+export function ErrorView({ errorCode, errorMessage, diagnostic, onRetry, onBack }: ErrorViewProps) {
   const errorInfo = errorMessages[errorCode] || errorMessages.UNKNOWN_ERROR
+
+  const handleDownloadDiagnostic = () => {
+    if (!diagnostic) return
+    
+    const blob = new Blob([JSON.stringify(diagnostic, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `error-diagnostic-${Date.now()}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <motion.div
@@ -164,7 +220,24 @@ export function ErrorView({ errorCode, errorMessage, onRetry, onBack }: ErrorVie
               <ArrowLeft weight="bold" className="w-4 h-4 mr-2" />
               Coba File Lain
             </Button>
+            {diagnostic && (
+              <Button onClick={handleDownloadDiagnostic} className="flex-1" variant="secondary">
+                <DownloadSimple weight="bold" className="w-4 h-4 mr-2" />
+                Download Diagnostic
+              </Button>
+            )}
           </div>
+
+          {diagnostic && (
+            <div className="text-xs text-muted-foreground bg-muted/50 p-3 rounded-lg font-mono space-y-1">
+              <div>Status: {diagnostic.status} {diagnostic.statusText}</div>
+              {diagnostic.requestId && <div>Request ID: {diagnostic.requestId}</div>}
+              {diagnostic.contentType && <div>Content-Type: {diagnostic.contentType}</div>}
+              {diagnostic.fileInfo && (
+                <div>File: {diagnostic.fileInfo.name} ({(diagnostic.fileInfo.size / 1024 / 1024).toFixed(2)}MB)</div>
+              )}
+            </div>
+          )}
 
           <Button onClick={onBack} variant="ghost" className="w-full">
             Kembali ke Beranda

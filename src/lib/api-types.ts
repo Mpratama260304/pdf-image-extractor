@@ -27,7 +27,8 @@ export interface ExtractionResponse {
   sizeBytes: number;
   pageCount: number;
   imageCount: number;
-  status: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed' | string;
+  errorMessage?: string | null;
   createdAt: string;
   expiresAt: string | null;
   images: ImageData[];

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Toaster, toast } from 'sonner';
@@ -8,11 +8,50 @@ import { UploadZone } from '@/components/UploadZone';
 import { ProcessingView } from '@/components/ProcessingView';
 import { ServerResultsView } from '@/components/ServerResultsView';
 import { ErrorView } from '@/components/ErrorView';
-import { uploadPDF } from '@/lib/api-client';
+import { uploadPDF, getExtractionStatus, ApiError, type RequestDiagnostic } from '@/lib/api-client';
 import type { ExtractionResponse } from '@/lib/api-types';
 import { CheckCircle, ArrowLeft } from '@phosphor-icons/react';
 
 type ViewState = 'hero' | 'upload' | 'processing' | 'results' | 'error';
+
+// Polling function for async extraction
+async function pollExtractionStatus(
+  extractionId: string,
+  onProgress: (progress: number, status: string) => void,
+  maxAttempts = 120, // 10 minutes with 5s interval
+  intervalMs = 5000
+): Promise<ExtractionResponse | null> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const result = await getExtractionStatus(extractionId);
+      
+      // Update progress based on attempt
+      const progressPercent = Math.min((attempt / maxAttempts) * 100, 95);
+      onProgress(progressPercent, `Processing PDF... (${Math.floor(attempt * intervalMs / 1000)}s)`);
+      
+      if (result.status === 'completed') {
+        return result;
+      }
+      
+      if (result.status === 'failed') {
+        throw new Error(result.errorMessage || 'Extraction failed');
+      }
+      
+      // Still processing, wait and retry
+      await new Promise(resolve => setTimeout(resolve, intervalMs));
+    } catch (error) {
+      // Don't retry on non-recoverable errors
+      if (error instanceof ApiError && error.diagnostic.status >= 400 && error.diagnostic.status < 500) {
+        throw error;
+      }
+      // Network errors - retry
+      console.warn(`Poll attempt ${attempt + 1} failed:`, error);
+      await new Promise(resolve => setTimeout(resolve, intervalMs));
+    }
+  }
+  
+  throw new Error('Extraction timeout - processing took too long');
+}
 
 export function HomePage() {
   const navigate = useNavigate();
@@ -25,6 +64,7 @@ export function HomePage() {
   const [errorInfo, setErrorInfo] = useState<{
     code: string;
     message: string;
+    diagnostic?: RequestDiagnostic;
   } | null>(null);
 
   const handleGetStarted = () => {
@@ -40,16 +80,56 @@ export function HomePage() {
     setErrorInfo(null);
 
     try {
-      // Simulate progress during upload
+      // Start upload progress
+      let progressValue = 0;
       const progressInterval = setInterval(() => {
-        setProgress((prev) => Math.min(prev + 5, 90));
-      }, 200);
+        progressValue = Math.min(progressValue + 2, 40);
+        setProgress(progressValue);
+      }, 100);
 
-      setStatus('Extracting images on server...');
+      setStatus('Uploading PDF...');
       
       const result = await uploadPDF(file);
       
       clearInterval(progressInterval);
+      setProgress(50);
+      
+      // Handle async processing (status 202)
+      if (result.status === 'processing') {
+        setStatus('Processing PDF on server...');
+        
+        // Poll for completion
+        const pollResult = await pollExtractionStatus(result.extractionId, (p, s) => {
+          setProgress(50 + Math.floor(p * 0.5)); // 50-100%
+          setStatus(s);
+        });
+        
+        if (pollResult) {
+          setExtractionResult(pollResult);
+          setProgress(100);
+          setStatus('Extraction complete!');
+          
+          if (pollResult.imageCount === 0) {
+            toast.error('No images found in PDF');
+            setView('upload');
+            return;
+          }
+          
+          toast.success(
+            <div className="flex items-center gap-2">
+              <CheckCircle weight="fill" className="w-5 h-5 text-green-500" />
+              <span>Extracted {pollResult.imageCount} images!</span>
+            </div>
+          );
+          
+          setTimeout(() => {
+            setView('results');
+          }, 500);
+          return;
+        }
+      }
+      
+      // Handle immediate completion (cached or fast extraction)
       setProgress(100);
       setStatus('Extraction complete!');
 
@@ -74,11 +154,20 @@ export function HomePage() {
     } catch (error) {
       console.error('Extraction error:', error);
       
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      setErrorInfo({
-        code: 'SERVER_ERROR',
-        message: errorMessage,
-      });
+      // Handle ApiError with diagnostic info
+      if (error instanceof ApiError) {
+        setErrorInfo({
+          code: error.diagnostic.errorType.toUpperCase(),
+          message: error.userMessage,
+          diagnostic: error.diagnostic,
+        });
+      } else {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        setErrorInfo({
+          code: 'SERVER_ERROR',
+          message: errorMessage,
+        });
+      }
       setView('error');
       toast.error('Failed to extract images from PDF');
     } finally {
@@ -201,6 +290,7 @@ export function HomePage() {
               <ErrorView
                 errorCode={errorInfo.code}
                 errorMessage={errorInfo.message}
+                diagnostic={errorInfo.diagnostic}
                 onRetry={handleRetryAfterError}
                 onBack={handleBackToHero}
               />

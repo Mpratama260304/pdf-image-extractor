@@ -703,3 +703,205 @@ async function performExtraction(
     throw error;
   }
 }
+/**
+ * Process PDF extraction with ASYNC model (for timeout prevention)
+ * 
+ * This function returns IMMEDIATELY after creating the extraction record.
+ * The actual extraction runs in the background.
+ * Frontend should poll GET /api/extractions/:id until status is COMPLETED/FAILED.
+ * 
+ * For cached/existing extractions, returns immediately with result.
+ */
+export async function processExtractionAsync(
+  pdfBuffer: Buffer,
+  originalFilename: string,
+  requestId: string,
+  onProgress?: ProgressCallback
+): Promise<UploadResult> {
+  // Calculate hash first to check for duplicates
+  const sha256 = calculateSHA256(pdfBuffer);
+  
+  console.log(`[${requestId}] Processing upload (async): ${originalFilename}, sha256=${sha256.slice(0, 12)}...`);
+  
+  // Check for existing extraction with same hash
+  let existing = await findExtractionBySha256(sha256);
+  
+  // Handle existing extraction based on status
+  if (existing) {
+    const filesExist = existsSync(getExtractionPath(existing.id));
+    
+    // Case 1: Completed and files exist → return cached result immediately
+    if (existing.status === ExtractionStatus.COMPLETED && filesExist && existing.images.length > 0) {
+      console.log(`[${requestId}] CACHE HIT: Returning existing completed extraction ${existing.id}`);
+      const shareLink = existing.shareLinks[0] || await createShareLink(existing.id);
+      
+      return {
+        extraction: existing,
+        shareToken: shareLink.token,
+        isExisting: true,
+        isCached: true,
+        status: ExtractionStatus.COMPLETED,
+      };
+    }
+    
+    // Case 2: Currently processing → return current state (frontend polls)
+    if (existing.status === ExtractionStatus.PROCESSING) {
+      console.log(`[${requestId}] IN PROGRESS: Extraction ${existing.id} is still processing`);
+      const shareLink = existing.shareLinks[0] || await createShareLink(existing.id);
+      
+      return {
+        extraction: existing,
+        shareToken: shareLink.token,
+        isExisting: true,
+        isCached: false,
+        status: ExtractionStatus.PROCESSING,
+      };
+    }
+    
+    // Case 3: Failed or files missing → clean up and retry with same record
+    console.log(`[${requestId}] RETRY: Reusing failed/incomplete extraction ${existing.id}`);
+    
+    // Clean up old files if any
+    await deleteExtractionFiles(existing.id);
+    
+    // Delete old images from DB
+    await prisma.image.deleteMany({ where: { extractionId: existing.id } });
+    
+    // Reset extraction for retry
+    existing = await prisma.extraction.update({
+      where: { id: existing.id },
+      data: {
+        status: ExtractionStatus.PROCESSING,
+        errorMessage: null,
+        pageCount: 0,
+        imageCount: 0,
+        originalFilename, // Update filename in case it changed
+        sizeBytes: pdfBuffer.length,
+      },
+      include: {
+        images: { orderBy: { sortOrder: 'asc' } },
+        shareLinks: { where: { isPublic: true } },
+      },
+    });
+    
+    // Start background processing
+    const shareLink = existing.shareLinks[0] || await createShareLink(existing.id);
+    
+    // Run extraction in background (don't await)
+    performExtractionWithTimeout(existing.id, pdfBuffer, originalFilename, sha256, requestId, onProgress)
+      .catch(error => {
+        console.error(`[${requestId}] Background extraction failed:`, error);
+      });
+    
+    return {
+      extraction: existing,
+      shareToken: shareLink.token,
+      isExisting: true,
+      isCached: false,
+      status: ExtractionStatus.PROCESSING,
+    };
+  }
+  
+  // No existing extraction → create new one
+  const extractionId = `ext_${Date.now()}_${randomBytes(8).toString('hex')}`;
+  const expiresAt = env.EXTRACTION_EXPIRY_DAYS > 0
+    ? new Date(Date.now() + env.EXTRACTION_EXPIRY_DAYS * 24 * 60 * 60 * 1000)
+    : undefined;
+  
+  try {
+    await createExtraction({
+      id: extractionId,
+      originalFilename,
+      sizeBytes: pdfBuffer.length,
+      sha256,
+      pageCount: 0,
+      imageCount: 0,
+      status: ExtractionStatus.PROCESSING,
+      expiresAt,
+    });
+    
+    // Create share link immediately
+    const shareLink = await createShareLink(extractionId);
+    
+    console.log(`[${requestId}] NEW: Created extraction ${extractionId}, starting background process`);
+    
+    // Get extraction with relations
+    const extraction = await getExtractionById(extractionId);
+    
+    // Start background processing (don't await - return 202 immediately)
+    performExtractionWithTimeout(extractionId, pdfBuffer, originalFilename, sha256, requestId, onProgress)
+      .catch(error => {
+        console.error(`[${requestId}] Background extraction failed:`, error);
+      });
+    
+    return {
+      extraction,
+      shareToken: shareLink.token,
+      isExisting: false,
+      isCached: false,
+      status: ExtractionStatus.PROCESSING,
+    };
+    
+  } catch (error) {
+    // Handle unique constraint violation (race condition)
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      console.log(`[${requestId}] RACE CONDITION: sha256 collision, refetching existing record`);
+      
+      // Refetch the existing record that won the race
+      const winner = await findExtractionBySha256(sha256);
+      
+      if (winner) {
+        const shareLink = winner.shareLinks[0] || await createShareLink(winner.id);
+        
+        return {
+          extraction: winner,
+          shareToken: shareLink.token,
+          isExisting: true,
+          isCached: winner.status === ExtractionStatus.COMPLETED,
+          status: winner.status as ExtractionStatusType,
+        };
+      }
+    }
+    
+    throw error;
+  }
+}
+
+/**
+ * Perform extraction with timeout protection
+ */
+async function performExtractionWithTimeout(
+  extractionId: string,
+  pdfBuffer: Buffer,
+  originalFilename: string,
+  sha256: string,
+  requestId: string,
+  onProgress?: ProgressCallback
+): Promise<void> {
+  // Timeout: 5 minutes max for extraction
+  const EXTRACTION_TIMEOUT_MS = 5 * 60 * 1000;
+  
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      reject(new Error(`Extraction timeout after ${EXTRACTION_TIMEOUT_MS / 1000}s`));
+    }, EXTRACTION_TIMEOUT_MS);
+  });
+  
+  try {
+    await Promise.race([
+      performExtraction(extractionId, pdfBuffer, originalFilename, sha256, onProgress),
+      timeoutPromise,
+    ]);
+    
+    console.log(`[${requestId}] Background extraction completed: ${extractionId}`);
+  } catch (error) {
+    // Update status to failed
+    await updateExtraction(extractionId, {
+      status: ExtractionStatus.FAILED,
+      errorMessage: error instanceof Error ? error.message : 'Unknown error',
+    });
+    
+    console.error(`[${requestId}] Background extraction failed: ${extractionId}`, error);
+    throw error;
+  }
+}

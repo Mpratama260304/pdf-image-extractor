@@ -1,6 +1,12 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { processExtraction, getShareLinkByToken, ExtractionStatus } from '../services/extraction.js';
+import { 
+  processExtraction, 
+  processExtractionAsync,
+  getShareLinkByToken, 
+  getExtractionById,
+  ExtractionStatus 
+} from '../services/extraction.js';
 import { shareTokenParamSchema } from './schemas.js';
 import { env } from '../config/env.js';
 import { createReadStream, existsSync } from 'fs';
@@ -9,15 +15,21 @@ import { getSettings } from '../services/settings.js';
 import { readBrandingFile, getMimeFromExtension, FAVICON_SIZES } from '../services/branding.js';
 
 export async function publicRoutes(fastify: FastifyInstance) {
-  // POST /api/extractions - Upload and extract PDF (idempotent by sha256)
+  // POST /api/extractions - Upload and extract PDF (async model for timeout prevention)
   fastify.post('/api/extractions', async (request: FastifyRequest, reply: FastifyReply) => {
+    const requestId = request.requestId || 'unknown';
+    
     try {
       const data = await request.file();
       
       if (!data) {
         return reply.status(400).send({
           success: false,
-          error: 'No file uploaded',
+          error: {
+            code: 'NO_FILE',
+            message: 'No file uploaded',
+            requestId,
+          },
         });
       }
       
@@ -26,7 +38,11 @@ export async function publicRoutes(fastify: FastifyInstance) {
       if (!filename.toLowerCase().endsWith('.pdf')) {
         return reply.status(400).send({
           success: false,
-          error: 'Only PDF files are supported',
+          error: {
+            code: 'INVALID_FILE_TYPE',
+            message: 'Only PDF files are supported',
+            requestId,
+          },
         });
       }
       
@@ -37,21 +53,32 @@ export async function publicRoutes(fastify: FastifyInstance) {
       }
       const buffer = Buffer.concat(chunks);
       
+      console.log(`[${requestId}] Upload received: ${filename}, size=${buffer.length} bytes`);
+      
       // Validate file size
       if (buffer.length > env.MAX_FILE_SIZE_BYTES) {
-        return reply.status(400).send({
+        return reply.status(413).send({
           success: false,
-          error: `File size exceeds maximum of ${env.MAX_FILE_SIZE_MB}MB`,
+          error: {
+            code: 'FILE_TOO_LARGE',
+            message: `File size exceeds maximum of ${env.MAX_FILE_SIZE_MB}MB`,
+            requestId,
+          },
         });
       }
       
-      // Process extraction (idempotent by sha256)
-      const result = await processExtraction(buffer, filename);
+      // Process extraction with async model
+      // Returns 202 immediately for new extractions, processes in background
+      const result = await processExtractionAsync(buffer, filename, requestId);
       
       if (!result.extraction) {
         return reply.status(500).send({
           success: false,
-          error: 'Extraction failed',
+          error: {
+            code: 'EXTRACTION_FAILED',
+            message: 'Extraction failed to initialize',
+            requestId,
+          },
         });
       }
       
@@ -59,15 +86,17 @@ export async function publicRoutes(fastify: FastifyInstance) {
       const sharePath = `/s/${result.shareToken}`;
       
       // Determine HTTP status based on result
-      // - 200: Cached result returned
+      // - 200: Cached result returned (completed)
       // - 201: New extraction created and completed
-      // - 202: Processing in progress (for race condition or retry)
+      // - 202: Processing in progress - frontend should poll
       let httpStatus = 201;
       if (result.isCached) {
         httpStatus = 200;
       } else if (result.status === ExtractionStatus.PROCESSING) {
         httpStatus = 202;
       }
+      
+      console.log(`[${requestId}] Response: status=${httpStatus}, extractionId=${result.extraction.id}`);
       
       return reply.status(httpStatus).send({
         success: true,
@@ -100,10 +129,85 @@ export async function publicRoutes(fastify: FastifyInstance) {
         },
       });
     } catch (error) {
-      console.error('Extraction error:', error);
+      console.error(`[${requestId}] Extraction error:`, error);
       return reply.status(500).send({
         success: false,
-        error: error instanceof Error ? error.message : 'Extraction failed',
+        error: {
+          code: 'EXTRACTION_ERROR',
+          message: error instanceof Error ? error.message : 'Extraction failed',
+          requestId,
+        },
+      });
+    }
+  });
+  
+  // GET /api/extractions/:id - Poll extraction status (for async model)
+  fastify.get('/api/extractions/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+    const requestId = request.requestId || 'unknown';
+    const { id } = request.params as { id: string };
+    
+    try {
+      const extraction = await getExtractionById(id);
+      
+      if (!extraction) {
+        return reply.status(404).send({
+          success: false,
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Extraction not found',
+            requestId,
+          },
+        });
+      }
+      
+      // Get share token
+      const shareLink = extraction.shareLinks[0];
+      const shareToken = shareLink?.token;
+      const sharePath = shareToken ? `/s/${shareToken}` : null;
+      
+      // Determine HTTP status based on extraction status
+      let httpStatus = 200;
+      if (extraction.status === ExtractionStatus.PROCESSING) {
+        httpStatus = 202; // Still processing
+      } else if (extraction.status === ExtractionStatus.FAILED) {
+        httpStatus = 200; // Return error details in body
+      }
+      
+      return reply.status(httpStatus).send({
+        success: true,
+        data: {
+          extractionId: extraction.id,
+          shareToken,
+          sharePath,
+          originalFilename: extraction.originalFilename,
+          sizeBytes: extraction.sizeBytes,
+          pageCount: extraction.pageCount,
+          imageCount: extraction.imageCount,
+          status: extraction.status,
+          errorMessage: extraction.errorMessage,
+          createdAt: extraction.createdAt.toISOString(),
+          expiresAt: extraction.expiresAt?.toISOString() || null,
+          images: extraction.images.map((img) => ({
+            id: img.id,
+            url: shareToken ? `/api/shares/${shareToken}/images/${img.filename}` : null,
+            filename: img.filename,
+            width: img.width,
+            height: img.height,
+            mimeType: img.mimeType,
+            sizeBytes: img.sizeBytes,
+            pageNumber: img.pageNumber,
+          })),
+        },
+      });
+    } catch (error) {
+      console.error(`[${requestId}] Get extraction error:`, error);
+      return reply.status(500).send({
+        success: false,
+        error: {
+          code: 'SERVER_ERROR',
+          message: error instanceof Error ? error.message : 'Failed to get extraction',
+          requestId,
+        },
       });
     }
   });
