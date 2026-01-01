@@ -66,8 +66,8 @@ RUN cd server && npm ci --omit=dev
 
 # Copy prisma schema and generated client from builder
 COPY --from=builder /app/server/prisma ./server/prisma
-COPY --from=builder /app/server/node_modules/.prisma ./server/node_modules/.prisma
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
 # Copy built artifacts
 COPY --from=builder /app/dist ./dist
