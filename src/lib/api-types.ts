@@ -111,3 +111,25 @@ export interface PaginatedResponse<T> {
   limit: number;
   totalPages: number;
 }
+
+// Settings types
+export interface SiteSettings {
+  siteTitle: string;
+  siteDescription: string;
+  adminLogoKey: string | null;
+  faviconKey: string | null;
+  adminLogoUrl: string | null;
+  faviconUrl: string | null;
+  allowedLogoTypes: string[];
+  allowedFaviconTypes: string[];
+  maxLogoSizeMB: number;
+  maxFaviconSizeMB: number;
+  updatedAt: string;
+}
+
+export interface PublicSettings {
+  siteTitle: string;
+  siteDescription: string;
+  hasAdminLogo: boolean;
+  hasFavicon: boolean;
+}

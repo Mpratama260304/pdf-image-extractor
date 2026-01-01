@@ -27,6 +27,7 @@ import {
   Warning,
   FileX,
   Timer,
+  Gear,
 } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -412,6 +413,12 @@ export function AdminDashboardPage() {
             <span className="text-sm text-muted-foreground">
               {user?.username}
             </span>
+            <Link to="/admin/settings">
+              <Button variant="ghost" size="sm">
+                <Gear weight="bold" className="w-4 h-4 mr-2" />
+                Settings
+              </Button>
+            </Link>
             <Button variant="ghost" size="sm" onClick={handleLogout}>
               <SignOut weight="bold" className="w-4 h-4 mr-2" />
               Logout

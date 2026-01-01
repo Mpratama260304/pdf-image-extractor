@@ -9,6 +9,7 @@ interface AuthContextType {
   login: (emailOrUsername: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -25,6 +26,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
     } finally {
       setIsLoading(false);
+    }
+  }, []);
+  
+  const refreshUser = useCallback(async () => {
+    try {
+      const { user } = await getAdminMe();
+      setUser(user);
+    } catch {
+      // Keep current user if refresh fails
     }
   }, []);
   
@@ -51,6 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         logout,
         checkAuth,
+        refreshUser,
       }}
     >
       {children}

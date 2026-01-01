@@ -7,7 +7,7 @@ import staticFiles from '@fastify/static';
 import cors from '@fastify/cors';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync } from 'fs';
 
 import { env } from './config/env.js';
 import prisma from './lib/prisma.js';
@@ -15,6 +15,7 @@ import { publicRoutes } from './routes/public.js';
 import { adminRoutes } from './routes/admin.js';
 import { startCleanupScheduler, stopCleanupScheduler } from './services/cleanup.js';
 import { adminExists, createAdmin } from './services/auth.js';
+import { getSettings } from './services/settings.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -30,6 +31,7 @@ const fastify = Fastify({
 function ensureStorageDir() {
   const storageDir = env.STORAGE_DIR;
   const extractionsDir = join(storageDir, 'extractions');
+  const brandingDir = join(storageDir, 'branding');
   
   if (!existsSync(storageDir)) {
     mkdirSync(storageDir, { recursive: true });
@@ -39,6 +41,11 @@ function ensureStorageDir() {
   if (!existsSync(extractionsDir)) {
     mkdirSync(extractionsDir, { recursive: true });
     console.log(`Created extractions directory: ${extractionsDir}`);
+  }
+  
+  if (!existsSync(brandingDir)) {
+    mkdirSync(brandingDir, { recursive: true });
+    console.log(`Created branding directory: ${brandingDir}`);
   }
 }
 
@@ -113,6 +120,75 @@ async function buildServer() {
       serve: true,
     });
     
+    // Read index.html template once at startup
+    const indexHtmlPath = join(distPath, 'index.html');
+    let indexHtmlTemplate = '';
+    if (existsSync(indexHtmlPath)) {
+      indexHtmlTemplate = readFileSync(indexHtmlPath, 'utf-8');
+    }
+    
+    // Helper function to inject metadata into HTML
+    async function getInjectedHtml(): Promise<string> {
+      if (!indexHtmlTemplate) return '';
+      
+      try {
+        const settings = await getSettings();
+        let html = indexHtmlTemplate;
+        
+        // Inject site title
+        html = html.replace(
+          /<title>[^<]*<\/title>/,
+          `<title>${escapeHtml(settings.siteTitle)}</title>`
+        );
+        
+        // Inject meta description
+        const descriptionMeta = `<meta name="description" content="${escapeHtml(settings.siteDescription)}">`;
+        if (html.includes('<meta name="description"')) {
+          html = html.replace(/<meta name="description"[^>]*>/, descriptionMeta);
+        } else {
+          html = html.replace('</head>', `    ${descriptionMeta}\n</head>`);
+        }
+        
+        // Inject favicon links if custom favicon exists
+        if (settings.faviconKey) {
+          const faviconLinks = `
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/branding/favicon-favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/branding/favicon-favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">`;
+          
+          // Remove existing favicon links and add new ones
+          html = html.replace(/<link[^>]*rel=["'](?:icon|apple-touch-icon|shortcut icon)["'][^>]*>\s*/gi, '');
+          html = html.replace('</head>', `${faviconLinks}\n</head>`);
+        }
+        
+        // Inject Open Graph tags
+        const ogTags = `
+    <meta property="og:title" content="${escapeHtml(settings.siteTitle)}">
+    <meta property="og:description" content="${escapeHtml(settings.siteDescription)}">
+    <meta property="og:type" content="website">`;
+        
+        // Remove existing OG tags and add new ones
+        html = html.replace(/<meta property="og:(title|description|type)"[^>]*>\s*/gi, '');
+        html = html.replace('</head>', `${ogTags}\n</head>`);
+        
+        return html;
+      } catch (error) {
+        console.error('Error injecting metadata:', error);
+        return indexHtmlTemplate;
+      }
+    }
+    
+    // Helper to escape HTML entities
+    function escapeHtml(text: string): string {
+      return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+    
     // SPA fallback - serve index.html for all non-API and non-asset routes
     fastify.setNotFoundHandler(async (request, reply: any) => {
       // Don't serve index.html for API routes
@@ -125,8 +201,18 @@ async function buildServer() {
         return reply.status(404).send({ success: false, error: 'Asset not found' });
       }
       
-      // SPA fallback: serve index.html for all other routes
-      return reply.sendFile('index.html');
+      // Don't serve index.html for branding routes (they have their own handlers)
+      if (request.url.startsWith('/branding/')) {
+        return reply.status(404).send({ success: false, error: 'Branding file not found' });
+      }
+      
+      // SPA fallback: serve index.html with injected metadata
+      const html = await getInjectedHtml();
+      if (!html) {
+        return reply.sendFile('index.html');
+      }
+      
+      reply.type('text/html').send(html);
     });
     
     console.log(`Serving static files from: ${distPath}`);

@@ -6,6 +6,8 @@ import type {
   AdminStats,
   AdminExtraction,
   PaginatedResponse,
+  SiteSettings,
+  PublicSettings,
 } from './api-types';
 
 const API_BASE = '/api';
@@ -208,4 +210,118 @@ export async function getBulkInfo(ids: string[]): Promise<{
     totalImages: number;
     extractions: { id: string; originalFilename: string; sizeBytes: number; imageCount: number }[];
   }>(response);
+}
+// Settings API
+
+export async function getAdminSettings(): Promise<SiteSettings> {
+  const response = await fetch(`${API_BASE}/admin/settings`, {
+    credentials: 'include',
+  });
+  
+  return handleResponse<SiteSettings>(response);
+}
+
+export async function updateAdminSettings(data: {
+  siteTitle?: string;
+  siteDescription?: string;
+}): Promise<SiteSettings> {
+  const response = await fetch(`${API_BASE}/admin/settings`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(data),
+  });
+  
+  return handleResponse<SiteSettings>(response);
+}
+
+export async function uploadAdminLogo(file: File): Promise<{ adminLogoKey: string; logoUrl: string }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  const response = await fetch(`${API_BASE}/admin/settings/admin-logo`, {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  });
+  
+  return handleResponse<{ adminLogoKey: string; logoUrl: string }>(response);
+}
+
+export async function removeAdminLogo(): Promise<void> {
+  const response = await fetch(`${API_BASE}/admin/settings/admin-logo`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  
+  if (!response.ok) {
+    const data = await response.json();
+    throw new Error(data.error || 'Failed to remove logo');
+  }
+}
+
+export async function uploadFavicon(file: File): Promise<{ faviconKey: string; generatedFiles: string[]; faviconUrl: string }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  const response = await fetch(`${API_BASE}/admin/settings/favicon`, {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  });
+  
+  return handleResponse<{ faviconKey: string; generatedFiles: string[]; faviconUrl: string }>(response);
+}
+
+export async function removeFavicon(): Promise<void> {
+  const response = await fetch(`${API_BASE}/admin/settings/favicon`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  
+  if (!response.ok) {
+    const data = await response.json();
+    throw new Error(data.error || 'Failed to remove favicon');
+  }
+}
+
+// Profile API
+
+export async function updateAdminProfile(data: {
+  email?: string;
+  username?: string;
+}): Promise<{ user: AdminUser }> {
+  const response = await fetch(`${API_BASE}/admin/profile`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(data),
+  });
+  
+  return handleResponse<{ user: AdminUser }>(response);
+}
+
+export async function updateAdminPassword(data: {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}): Promise<void> {
+  const response = await fetch(`${API_BASE}/admin/profile/password`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(data),
+  });
+  
+  if (!response.ok) {
+    const data = await response.json();
+    throw new Error(data.error || 'Failed to update password');
+  }
+}
+
+// Public Settings API (no auth required)
+
+export async function getPublicSettings(): Promise<PublicSettings> {
+  const response = await fetch(`${API_BASE}/public/settings`);
+  return handleResponse<PublicSettings>(response);
 }

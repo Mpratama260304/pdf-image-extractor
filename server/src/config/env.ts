@@ -99,6 +99,10 @@ const envSchema = z.object({
   MAX_FILE_SIZE_MB: z.string().default('200'),
   MAX_PAGES: z.string().default('500'),
   
+  // Branding upload limits (in MB)
+  ADMIN_LOGO_MAX_SIZE_MB: z.string().default('2'),
+  FAVICON_MAX_SIZE_MB: z.string().default('1'),
+  
   // URLs
   PUBLIC_BASE_URL: z.string().url().optional(),
   
@@ -147,12 +151,16 @@ export const env = {
   STORAGE_DIR: parsed.data.STORAGE_DIR,
   MAX_FILE_SIZE_MB: parseInt(parsed.data.MAX_FILE_SIZE_MB, 10),
   MAX_PAGES: parseInt(parsed.data.MAX_PAGES, 10),
+  ADMIN_LOGO_MAX_SIZE_MB: parseInt(parsed.data.ADMIN_LOGO_MAX_SIZE_MB, 10),
+  FAVICON_MAX_SIZE_MB: parseInt(parsed.data.FAVICON_MAX_SIZE_MB, 10),
   PUBLIC_BASE_URL: parsed.data.PUBLIC_BASE_URL,
   EXTRACTION_EXPIRY_DAYS: parseInt(parsed.data.EXTRACTION_EXPIRY_DAYS, 10),
   ENABLE_AUTO_CLEANUP: parsed.data.ENABLE_AUTO_CLEANUP === 'true',
   
   // Derived
   MAX_FILE_SIZE_BYTES: parseInt(parsed.data.MAX_FILE_SIZE_MB, 10) * 1024 * 1024,
+  ADMIN_LOGO_MAX_SIZE_BYTES: parseInt(parsed.data.ADMIN_LOGO_MAX_SIZE_MB, 10) * 1024 * 1024,
+  FAVICON_MAX_SIZE_BYTES: parseInt(parsed.data.FAVICON_MAX_SIZE_MB, 10) * 1024 * 1024,
   IS_PRODUCTION: parsed.data.NODE_ENV === 'production',
   IS_DEVELOPMENT: parsed.data.NODE_ENV === 'development',
   IS_RAILWAY: isRailway,

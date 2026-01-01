@@ -5,6 +5,8 @@ import { shareTokenParamSchema } from './schemas.js';
 import { env } from '../config/env.js';
 import { createReadStream, existsSync } from 'fs';
 import { join } from 'path';
+import { getSettings } from '../services/settings.js';
+import { readBrandingFile, getMimeFromExtension, FAVICON_SIZES } from '../services/branding.js';
 
 export async function publicRoutes(fastify: FastifyInstance) {
   // POST /api/extractions - Upload and extract PDF (idempotent by sha256)
@@ -271,6 +273,154 @@ export async function publicRoutes(fastify: FastifyInstance) {
       return reply.status(500).send({
         success: false,
         error: 'Failed to fetch image',
+      });
+    }
+  });
+
+  // =====================
+  // Branding Routes (Public)
+  // =====================
+
+  // GET /favicon.ico - Serve custom favicon
+  fastify.get('/favicon.ico', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const settings = await getSettings();
+      
+      if (!settings.faviconKey) {
+        // No custom favicon, return 404 (browser will use default)
+        return reply.status(404).send();
+      }
+      
+      // Try to serve the .ico file
+      const icoFile = await readBrandingFile(`${settings.faviconKey}.ico`);
+      if (icoFile) {
+        reply.header('Content-Type', 'image/x-icon');
+        reply.header('Cache-Control', 'public, max-age=86400'); // 1 day cache
+        reply.header('X-Content-Type-Options', 'nosniff');
+        return reply.send(icoFile);
+      }
+      
+      return reply.status(404).send();
+    } catch (error) {
+      console.error('Error serving favicon:', error);
+      return reply.status(500).send();
+    }
+  });
+
+  // GET /branding/admin-logo - Serve admin logo
+  fastify.get('/branding/admin-logo', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const settings = await getSettings();
+      
+      if (!settings.adminLogoKey) {
+        return reply.status(404).send({
+          success: false,
+          error: 'No admin logo configured',
+        });
+      }
+      
+      const logoFile = await readBrandingFile(settings.adminLogoKey);
+      if (!logoFile) {
+        return reply.status(404).send({
+          success: false,
+          error: 'Logo file not found',
+        });
+      }
+      
+      // Determine MIME type from filename
+      const mimeType = getMimeFromExtension(settings.adminLogoKey) || 'application/octet-stream';
+      
+      reply.header('Content-Type', mimeType);
+      reply.header('Cache-Control', 'public, max-age=86400'); // 1 day cache
+      reply.header('X-Content-Type-Options', 'nosniff');
+      return reply.send(logoFile);
+    } catch (error) {
+      console.error('Error serving admin logo:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to serve logo',
+      });
+    }
+  });
+
+  // GET /branding/favicon-:size - Serve specific favicon size (e.g., favicon-32x32.png)
+  fastify.get('/branding/favicon-:sizeFile', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const params = z.object({
+        sizeFile: z.string(),
+      }).parse(request.params);
+      
+      const settings = await getSettings();
+      
+      if (!settings.faviconKey) {
+        return reply.status(404).send();
+      }
+      
+      // Construct the full filename (e.g., favicon-abc123-favicon-32x32.png)
+      const filename = `${settings.faviconKey}-${params.sizeFile}`;
+      const faviconFile = await readBrandingFile(filename);
+      
+      if (!faviconFile) {
+        return reply.status(404).send();
+      }
+      
+      const mimeType = getMimeFromExtension(filename) || 'image/png';
+      
+      reply.header('Content-Type', mimeType);
+      reply.header('Cache-Control', 'public, max-age=86400');
+      reply.header('X-Content-Type-Options', 'nosniff');
+      return reply.send(faviconFile);
+    } catch (error) {
+      console.error('Error serving favicon size:', error);
+      return reply.status(500).send();
+    }
+  });
+
+  // GET /apple-touch-icon.png - Apple touch icon shortcut
+  fastify.get('/apple-touch-icon.png', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const settings = await getSettings();
+      
+      if (!settings.faviconKey) {
+        return reply.status(404).send();
+      }
+      
+      const filename = `${settings.faviconKey}-apple-touch-icon.png`;
+      const iconFile = await readBrandingFile(filename);
+      
+      if (!iconFile) {
+        return reply.status(404).send();
+      }
+      
+      reply.header('Content-Type', 'image/png');
+      reply.header('Cache-Control', 'public, max-age=86400');
+      reply.header('X-Content-Type-Options', 'nosniff');
+      return reply.send(iconFile);
+    } catch (error) {
+      console.error('Error serving apple touch icon:', error);
+      return reply.status(500).send();
+    }
+  });
+
+  // GET /api/public/settings - Get public site settings (no auth required)
+  fastify.get('/api/public/settings', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const settings = await getSettings();
+      
+      return reply.send({
+        success: true,
+        data: {
+          siteTitle: settings.siteTitle,
+          siteDescription: settings.siteDescription,
+          hasAdminLogo: !!settings.adminLogoKey,
+          hasFavicon: !!settings.faviconKey,
+        },
+      });
+    } catch (error) {
+      console.error('Error fetching public settings:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to fetch settings',
       });
     }
   });

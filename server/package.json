@@ -27,6 +27,7 @@
     "fastify": "^5.6.2",
     "node-cron": "^3.0.3",
     "pdfjs-dist": "^4.10.38",
+    "sharp": "^0.34.5",
     "zod": "^3.25.76"
   },
   "devDependencies": {

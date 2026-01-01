@@ -16,6 +16,21 @@ import {
 } from '../services/extraction.js';
 import { runCleanupNow } from '../services/cleanup.js';
 import {
+  getSettings,
+  updateSettings,
+  updateAdminProfile,
+  updateAdminPassword,
+  isEmailTaken,
+  isUsernameTaken,
+} from '../services/settings.js';
+import {
+  saveAdminLogo,
+  saveFavicon,
+  cleanupOldBrandingFiles,
+  readBrandingFile,
+  getMimeFromExtension,
+} from '../services/branding.js';
+import {
   loginSchema,
   adminPaginationSchema,
   extractionIdParamSchema,
@@ -23,6 +38,9 @@ import {
   updateShareLinkSchema,
   bulkDeleteSchema,
   bulkUpdateExpirySchema,
+  updateSettingsSchema,
+  updateProfileSchema,
+  updatePasswordSchema,
 } from './schemas.js';
 
 // JWT payload type
@@ -528,6 +546,371 @@ export async function adminRoutes(fastify: FastifyInstance) {
       return reply.status(500).send({
         success: false,
         error: 'Failed to get bulk info',
+      });
+    }
+  });
+
+  // =====================
+  // Settings Routes
+  // =====================
+
+  // Allowed file types for uploads
+  const ALLOWED_LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
+  const ALLOWED_FAVICON_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml', 'image/x-icon', 'image/vnd.microsoft.icon'];
+
+  // GET /api/admin/settings - Get site settings
+  fastify.get('/api/admin/settings', { preHandler: authenticate }, async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const settings = await getSettings();
+      
+      return reply.send({
+        success: true,
+        data: {
+          siteTitle: settings.siteTitle,
+          siteDescription: settings.siteDescription,
+          adminLogoKey: settings.adminLogoKey,
+          faviconKey: settings.faviconKey,
+          adminLogoUrl: settings.adminLogoKey ? '/branding/admin-logo' : null,
+          faviconUrl: settings.faviconKey ? '/favicon.ico' : null,
+          allowedLogoTypes: ALLOWED_LOGO_TYPES,
+          allowedFaviconTypes: ALLOWED_FAVICON_TYPES,
+          maxLogoSizeMB: env.ADMIN_LOGO_MAX_SIZE_MB,
+          maxFaviconSizeMB: env.FAVICON_MAX_SIZE_MB,
+          updatedAt: settings.updatedAt.toISOString(),
+        },
+      });
+    } catch (error) {
+      console.error('Get settings error:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to get settings',
+      });
+    }
+  });
+
+  // PATCH /api/admin/settings - Update site settings
+  fastify.patch('/api/admin/settings', { preHandler: authenticate }, async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const body = updateSettingsSchema.parse(request.body);
+      
+      const settings = await updateSettings(body);
+      
+      return reply.send({
+        success: true,
+        data: {
+          siteTitle: settings.siteTitle,
+          siteDescription: settings.siteDescription,
+          adminLogoKey: settings.adminLogoKey,
+          faviconKey: settings.faviconKey,
+          updatedAt: settings.updatedAt.toISOString(),
+        },
+        message: 'Settings updated successfully',
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({
+          success: false,
+          error: error.errors[0]?.message || 'Invalid settings data',
+        });
+      }
+      
+      console.error('Update settings error:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to update settings',
+      });
+    }
+  });
+
+  // POST /api/admin/settings/admin-logo - Upload admin logo
+  // Rate limited: 10 uploads per 15 minutes per IP
+  fastify.post('/api/admin/settings/admin-logo', { 
+    preHandler: authenticate,
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: '15 minutes',
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const data = await request.file();
+      
+      if (!data) {
+        return reply.status(400).send({
+          success: false,
+          error: 'No file uploaded',
+        });
+      }
+      
+      const buffer = await data.toBuffer();
+      
+      // Check file size (configurable via env, default 2MB for logos)
+      if (buffer.length > env.ADMIN_LOGO_MAX_SIZE_BYTES) {
+        return reply.status(400).send({
+          success: false,
+          error: `File too large. Maximum size is ${env.ADMIN_LOGO_MAX_SIZE_MB}MB`,
+        });
+      }
+      
+      const result = await saveAdminLogo(buffer, data.mimetype, data.filename);
+      
+      if (!result.success) {
+        return reply.status(400).send({
+          success: false,
+          error: result.error,
+        });
+      }
+      
+      // Get current settings to cleanup old logo
+      const currentSettings = await getSettings();
+      if (currentSettings.adminLogoKey && currentSettings.adminLogoKey !== result.key) {
+        await cleanupOldBrandingFiles(currentSettings.adminLogoKey);
+      }
+      
+      // Update settings with new logo key
+      const settings = await updateSettings({ adminLogoKey: result.key });
+      
+      return reply.send({
+        success: true,
+        data: {
+          adminLogoKey: settings.adminLogoKey,
+          logoUrl: `/branding/admin-logo`,
+        },
+        message: 'Logo uploaded successfully',
+      });
+    } catch (error) {
+      console.error('Upload logo error:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to upload logo',
+      });
+    }
+  });
+
+  // DELETE /api/admin/settings/admin-logo - Remove admin logo
+  fastify.delete('/api/admin/settings/admin-logo', { preHandler: authenticate }, async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const currentSettings = await getSettings();
+      
+      if (currentSettings.adminLogoKey) {
+        await cleanupOldBrandingFiles(currentSettings.adminLogoKey);
+      }
+      
+      await updateSettings({ adminLogoKey: null });
+      
+      return reply.send({
+        success: true,
+        message: 'Logo removed successfully',
+      });
+    } catch (error) {
+      console.error('Remove logo error:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to remove logo',
+      });
+    }
+  });
+
+  // POST /api/admin/settings/favicon - Upload favicon
+  // Rate limited: 10 uploads per 15 minutes per IP
+  fastify.post('/api/admin/settings/favicon', { 
+    preHandler: authenticate,
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: '15 minutes',
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const data = await request.file();
+      
+      if (!data) {
+        return reply.status(400).send({
+          success: false,
+          error: 'No file uploaded',
+        });
+      }
+      
+      const buffer = await data.toBuffer();
+      
+      // Check file size (configurable via env, default 1MB for favicons)
+      if (buffer.length > env.FAVICON_MAX_SIZE_BYTES) {
+        return reply.status(400).send({
+          success: false,
+          error: `File too large. Maximum size is ${env.FAVICON_MAX_SIZE_MB}MB`,
+        });
+      }
+      
+      const result = await saveFavicon(buffer, data.mimetype, data.filename);
+      
+      if (!result.success) {
+        return reply.status(400).send({
+          success: false,
+          error: result.error,
+        });
+      }
+      
+      // Get current settings to cleanup old favicon
+      const currentSettings = await getSettings();
+      if (currentSettings.faviconKey && currentSettings.faviconKey !== result.key) {
+        await cleanupOldBrandingFiles(currentSettings.faviconKey);
+      }
+      
+      // Update settings with new favicon key
+      const settings = await updateSettings({ faviconKey: result.key });
+      
+      return reply.send({
+        success: true,
+        data: {
+          faviconKey: settings.faviconKey,
+          generatedFiles: result.generatedFiles,
+          faviconUrl: `/favicon.ico`,
+        },
+        message: 'Favicon uploaded successfully',
+      });
+    } catch (error) {
+      console.error('Upload favicon error:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to upload favicon',
+      });
+    }
+  });
+
+  // DELETE /api/admin/settings/favicon - Remove favicon
+  fastify.delete('/api/admin/settings/favicon', { preHandler: authenticate }, async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const currentSettings = await getSettings();
+      
+      if (currentSettings.faviconKey) {
+        await cleanupOldBrandingFiles(currentSettings.faviconKey);
+      }
+      
+      await updateSettings({ faviconKey: null });
+      
+      return reply.send({
+        success: true,
+        message: 'Favicon removed successfully',
+      });
+    } catch (error) {
+      console.error('Remove favicon error:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to remove favicon',
+      });
+    }
+  });
+
+  // =====================
+  // Profile Routes
+  // =====================
+
+  // PATCH /api/admin/profile - Update admin profile (email/username)
+  fastify.patch('/api/admin/profile', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply: FastifyReply) => {
+    try {
+      const body = updateProfileSchema.parse(request.body);
+      const adminId = request.adminUser!.id;
+      
+      // Check if email is taken by another user
+      if (body.email) {
+        const emailTaken = await isEmailTaken(body.email, adminId);
+        if (emailTaken) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Email is already in use',
+          });
+        }
+      }
+      
+      // Check if username is taken by another user
+      if (body.username) {
+        const usernameTaken = await isUsernameTaken(body.username, adminId);
+        if (usernameTaken) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Username is already in use',
+          });
+        }
+      }
+      
+      const updatedAdmin = await updateAdminProfile(adminId, body);
+      
+      // Generate new JWT with updated info
+      const token = fastify.jwt.sign({
+        id: updatedAdmin.id,
+        email: updatedAdmin.email,
+        username: updatedAdmin.username,
+      });
+      
+      // Set updated cookie
+      reply.setCookie('auth_token', token, {
+        httpOnly: true,
+        secure: env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 60 * 60 * 24 * 7, // 7 days
+      });
+      
+      return reply.send({
+        success: true,
+        data: {
+          user: {
+            id: updatedAdmin.id,
+            email: updatedAdmin.email,
+            username: updatedAdmin.username,
+          },
+        },
+        message: 'Profile updated successfully',
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({
+          success: false,
+          error: error.errors[0]?.message || 'Invalid profile data',
+        });
+      }
+      
+      console.error('Update profile error:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to update profile',
+      });
+    }
+  });
+
+  // PATCH /api/admin/profile/password - Update admin password
+  fastify.patch('/api/admin/profile/password', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply: FastifyReply) => {
+    try {
+      const body = updatePasswordSchema.parse(request.body);
+      const adminId = request.adminUser!.id;
+      
+      const result = await updateAdminPassword(adminId, body.currentPassword, body.newPassword);
+      
+      if (!result.success) {
+        return reply.status(400).send({
+          success: false,
+          error: result.error,
+        });
+      }
+      
+      return reply.send({
+        success: true,
+        message: 'Password updated successfully',
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({
+          success: false,
+          error: error.errors[0]?.message || 'Invalid password data',
+        });
+      }
+      
+      console.error('Update password error:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to update password',
       });
     }
   });

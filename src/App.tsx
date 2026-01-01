@@ -4,6 +4,7 @@ import { HomePage } from '@/pages/HomePage';
 import { SharePage } from '@/pages/SharePage';
 import { AdminLoginPage } from '@/pages/AdminLoginPage';
 import { AdminDashboardPage } from '@/pages/AdminDashboardPage';
+import { AdminSettingsPage } from '@/pages/AdminSettingsPage';
 
 function App() {
   return (
@@ -17,6 +18,7 @@ function App() {
           {/* Admin routes */}
           <Route path="/admin/login" element={<AdminLoginPage />} />
           <Route path="/admin" element={<AdminDashboardPage />} />
+          <Route path="/admin/settings" element={<AdminSettingsPage />} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>

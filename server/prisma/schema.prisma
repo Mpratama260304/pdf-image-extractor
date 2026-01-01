@@ -65,3 +65,14 @@ model ShareLink {
   @@index([extractionId])
   @@index([token])
 }
+
+// Singleton settings table for site configuration
+model Settings {
+  id              String   @id @default("singleton")
+  siteTitle       String   @default("PDF Image Extractor")
+  siteDescription String   @default("Extract images from PDF files easily")
+  adminLogoKey    String?  // Key/filename for admin logo in branding storage
+  faviconKey      String?  // Key/filename for favicon in branding storage  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
